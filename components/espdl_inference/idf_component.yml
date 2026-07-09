@@ -1,0 +1,5 @@
+## espdl_inference 组件依赖声明
+## 需要 ESP-DL >= 3.1.0 来支持 .espdl 模型加载和 Fbank 特征提取。
+dependencies:
+  espressif/esp-dl:
+    version: "^3.1.0"

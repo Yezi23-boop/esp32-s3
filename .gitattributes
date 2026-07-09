@@ -1,0 +1,22 @@
+* text=auto eol=crlf
+
+# Binary assets must not be line-ending normalized.
+*.bin binary
+*.elf binary
+*.map binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.pdf binary
+*.docx binary
+*.pptx binary
+*.xlsx binary

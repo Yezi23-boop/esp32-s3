@@ -1,0 +1,171 @@
+menu "Official Chat"
+
+config USE_AUDIO_PROCESSOR
+    bool "Enable official_chat audio processor"
+    default y
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        Enable the AFE-based audio processor inside official_chat.
+
+config USE_DEVICE_AEC
+    bool "Enable official_chat device-side AEC"
+    default n
+    depends on USE_AUDIO_PROCESSOR
+    help
+        Enable device-side AEC for the AFE audio processor.
+
+config SEND_WAKE_WORD_DATA
+    bool "Send wake word audio before listen/start"
+    default y
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        Encode and send the cached wake word audio before a wake-word-triggered chat.
+
+config WAKE_WORD_DETECTION_IN_LISTENING
+    bool "Enable wake word detection while listening"
+    default n
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        Keep wake word detection active during listening so wake words can
+        interrupt an ongoing conversation.
+
+config OFFICIAL_CHAT_OTA_URL
+    string "Official chat OTA URL"
+    default "https://api.tenclass.net/xiaozhi/ota/"
+    help
+        Default OTA endpoint used by official_chat when wifi.ota_url is not
+        present in NVS.
+
+config OFFICIAL_CHAT_LANGUAGE_CODE
+    string "Official chat language code"
+    default "zh-CN"
+    help
+        Language code used by official_chat for OTA requests and metadata.
+
+config OFFICIAL_CHAT_UDP_AUDIO_STALL_TIMEOUT_MS
+    int "Official chat UDP audio stall timeout (ms)"
+    default 5000
+    range 1000 15000
+    help
+        Maximum silence gap allowed between downlink UDP audio packets while
+        MQTT TTS text is still arriving. Increase this when Wi-Fi jitter causes
+        false mid-sentence stalls.
+
+endmenu
+
+menu "AI Memory Watch"
+
+config MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    bool "Enable default watch endpoint config"
+    default y
+    help
+        Provide a compile-time fallback endpoint for AI Memory Watch when NVS
+        does not contain a SoftAP-provisioned endpoint yet. NVS remains the
+        higher-priority runtime configuration source.
+
+config MEMORY_WATCH_DEFAULT_BASE_URL
+    string "Default watch endpoint base URL"
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    default "https://watch.example.com"
+    help
+        Public watch endpoint base URL. The ESP32 only calls /v1/watch/*
+        under this endpoint; Hermes API Server and Dashboard must remain
+        server-side private services.
+
+config MEMORY_WATCH_DEFAULT_DEVICE_ID
+    string "Default watch device ID"
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    default "watch-001"
+    help
+        Device ID used by the watch endpoint to select the matching
+        device_token on the server.
+
+config MEMORY_WATCH_DEFAULT_DEVICE_TOKEN
+    string "Default watch device token"
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    default ""
+    help
+        Device token sent as Authorization: Bearer <device_token> to the watch
+        endpoint. This is only a watch device token; never put Hermes, MiMo,
+        Cloudflare, or API Server keys here. Leave empty for production images
+        that must be configured through SoftAP/NVS.
+
+config MEMORY_WATCH_DEFAULT_TIMEOUT_MS
+    int "Default watch request timeout (ms)"
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    default 120000
+    range 1000 300000
+    help
+        Maximum watch-side wait time for one voice/text request. Keep this
+        slightly above the server-side request budget so the server can return
+        a fixed V1 JSON timeout before the ESP32 gives up.
+
+config MEMORY_WATCH_DEFAULT_ALLOW_HTTP
+    bool "Allow default HTTP watch endpoint"
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    default n
+    help
+        Allow an http:// default endpoint. Keep disabled for the public V1
+        domain; enable only for local LAN development endpoints.
+
+config MEMORY_WATCH_BOOT_HEALTH_CHECK
+    bool "Run boot health check"
+    default y
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    help
+        After networking is ready, check /v1/watch/health once so the Hermes
+        page can show the initial online status during development.
+
+config MEMORY_WATCH_BOOT_TEXT_SMOKE
+    bool "Run boot text smoke"
+    default n
+    depends on MEMORY_WATCH_BOOT_HEALTH_CHECK
+    help
+        Send one development text command after a successful boot health check.
+        Keep disabled for V1 because it writes extra memory entries to Hermes.
+
+config MEMORY_WATCH_BOOT_TEXT
+    string "Boot text smoke content"
+    depends on MEMORY_WATCH_BOOT_TEXT_SMOKE
+    default "记一下 ESP32 文本链路实机测试"
+    help
+        Text used only when MEMORY_WATCH_BOOT_TEXT_SMOKE is enabled.
+
+config MEMORY_WATCH_WEBSOCKET_ENABLED
+    bool "Use WebSocket for Hermes voice conversation"
+    default y
+    depends on MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
+    help
+        Enable the V2.1 experimental /v1/watch/ws path for active Hermes
+        conversations. The existing HTTP voice-command path remains available
+        as a rollback route during development.
+
+config RUNTIME_RESOURCE_GATE_BOARD_TEST
+    bool "Run runtime resource gate board stress test"
+    default n
+    help
+        Run a one-shot board-side stress sequence after boot to exercise the
+        foreground runtime gate, background HTTPS gate, Hermes foreground
+        owner, Safety Monitor yield path, and BLE quiet-window resource model.
+        Keep disabled for normal images.
+
+config RUNTIME_RESOURCE_GATE_BOARD_TEST_START_DELAY_MS
+    int "Runtime resource gate board test start delay (ms)"
+    depends on RUNTIME_RESOURCE_GATE_BOARD_TEST
+    default 12000
+    range 1000 120000
+    help
+        Delay before the one-shot test starts. This gives UI, networking and
+        Memory Watch workers time to initialize before the test creates
+        resource pressure.
+
+config RUNTIME_RESOURCE_GATE_BOARD_TEST_ENABLE_REAL_BLE_TOGGLE
+    bool "Allow board test to toggle BLE"
+    depends on RUNTIME_RESOURCE_GATE_BOARD_TEST
+    default n
+    help
+        Also call network_service_set_ble_enabled(true/false) during the test.
+        This can start the BLE controller and consume internal RAM, so keep it
+        disabled unless you explicitly want the high-pressure BLE path.
+
+endmenu

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>手表 Wi-Fi 配网</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+
+<body>
+    <main class="portal-shell">
+        <section class="hero-panel" aria-label="手表 Wi-Fi 配网">
+            <header class="portal-header">
+                <p class="portal-kicker">手表 Wi-Fi 配网</p>
+                <p class="portal-copy">选择 Wi-Fi，输入密码，手表会自动连接。</p>
+            </header>
+
+            <section class="portal-status" aria-live="polite">
+                <div class="status-row">
+                    <span class="status-dot" id="api-dot"></span>
+                    <div>
+                        <span class="status-label">设备状态</span>
+                        <strong id="api-text">正在检测设备门户...</strong>
+                        <p id="api-note">正在通过官方 provisioning 接口读取状态。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="quick-guide" aria-label="当前配网状态">
+                <div class="guide-summary">
+                    <span>当前状态</span>
+                    <strong id="current-step-text">正在检测设备门户</strong>
+                </div>
+                <div class="guide-track" aria-label="配网步骤">
+                    <div class="guide-step active">
+                        <span>1</span>
+                        <strong>连接热点</strong>
+                    </div>
+                    <div class="guide-step" id="scan-step">
+                        <span>2</span>
+                        <strong>选择网络</strong>
+                    </div>
+                    <div class="guide-step" id="send-step">
+                        <span>3</span>
+                        <strong>发送凭据</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="portal-actions" aria-label="门户操作">
+                <button id="scan-btn" class="primary-btn" type="button">
+                    <span class="btn-icon" aria-hidden="true">⌁</span>
+                    扫描 Wi-Fi
+                </button>
+                <button id="refresh-btn" class="ghost-btn" type="button">
+                    <span class="btn-icon" aria-hidden="true">↻</span>
+                    刷新状态
+                </button>
+            </section>
+
+            <section class="wifi-list-wrap" aria-labelledby="wifi-list-title">
+                <div class="section-title-row">
+                    <div>
+                        <h2 id="wifi-list-title">附近网络</h2>
+                        <p>点击网络可自动填入名称。</p>
+                    </div>
+                    <span id="scan-capability" class="capability-chip pending">扫描检测中</span>
+                </div>
+                <div id="wifi-list" class="wifi-list empty"></div>
+            </section>
+
+            <section class="portal-form" aria-labelledby="form-title">
+                <div class="section-title-row form-heading">
+                    <div>
+                        <h2 id="form-title">Wi-Fi 凭据</h2>
+                        <p>密码只会发送给当前设备门户。</p>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="ssid">网络名称</label>
+                    <input id="ssid" name="ssid" type="text" placeholder="输入 SSID 或从上方选择" autocomplete="off">
+                </div>
+
+                <div class="field">
+                    <label for="password">网络密码</label>
+                    <div class="password-wrap">
+                        <input id="password" name="password" type="password" placeholder="输入 Wi-Fi 密码" autocomplete="current-password">
+                        <button id="toggle-password-btn" class="icon-btn" type="button" aria-label="显示密码">显</button>
+                    </div>
+                </div>
+
+                <button id="configure-btn" class="secondary-btn" type="button">
+                    <span class="btn-icon" aria-hidden="true">✓</span>
+                    连接 Wi-Fi
+                </button>
+            </section>
+
+            <section class="hermes-section" aria-labelledby="hermes-title">
+                <button id="hermes-toggle" class="hermes-toggle" type="button" aria-expanded="false" aria-controls="hermes-form">
+                    <span class="hermes-toggle-icon" aria-hidden="true">▸</span>
+                    <span>
+                        <strong id="hermes-title">AI Memory Watch</strong>
+                        <span id="hermes-status" class="hermes-status">未配置</span>
+                    </span>
+                </button>
+
+                <div id="hermes-form" class="hermes-form collapsed" aria-hidden="true">
+                    <div class="field">
+                        <label for="hermes-base-url">Hermes 地址</label>
+                        <input id="hermes-base-url" name="hermes-base-url" type="url" placeholder="https://watch.example.com" value="" autocomplete="off">
+                    </div>
+
+                    <div class="field">
+                        <label for="hermes-device-id">设备 ID</label>
+                        <input id="hermes-device-id" name="hermes-device-id" type="text" placeholder="watch-001" value="watch-001" autocomplete="off">
+                    </div>
+
+                    <div class="field">
+                        <label for="hermes-device-token">设备 Token</label>
+                        <div class="password-wrap">
+                            <input id="hermes-device-token" name="hermes-device-token" type="password" placeholder="输入 watch endpoint 设备 token" autocomplete="off">
+                            <button id="toggle-token-btn" class="icon-btn" type="button" aria-label="显示 token">显</button>
+                        </div>
+                    </div>
+
+                    <div class="hermes-options">
+                        <label class="checkbox-label">
+                            <input id="hermes-allow-http" name="hermes-allow-http" type="checkbox">
+                            <span>允许 HTTP 明文（仅限本地开发）</span>
+                        </label>
+                    </div>
+
+                    <button id="hermes-save-btn" class="secondary-btn hermes-save-btn" type="button">
+                        <span class="btn-icon" aria-hidden="true">✓</span>
+                        保存 Hermes 配置
+                    </button>
+                </div>
+            </section>
+
+            <section id="feedback" class="feedback hidden" aria-live="polite"></section>
+        </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+</body>
+
+</html>

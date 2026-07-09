@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "math_util.c"
+        "system_util.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        app_update
+        spi_flash
+)
