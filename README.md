@@ -1,6 +1,6 @@
 # AI Memory Watch
 
-基于 ESP32-S3 的智能手表固件：AI 语音助手、危险声音识别、跌倒检测、在线音乐、OTA 升级与 LVGL 界面，推理与交互全部在片内完成。
+基于 ESP32-S3 的智能手表固件：AI 语音助手、危险声音识别、跌倒检测、网易云音乐、OTA 升级与 LVGL 界面，推理与交互全部在片内完成。
 
 📺 **演示视频**：[【ESP32-S3智能手表】](https://www.bilibili.com/video/BV1oqhB6JE1t?vd_source=1374b94fcc0de11cf1dcaf19ac622262)
 
@@ -11,7 +11,7 @@
 | AI 语音助手（Hermes） | 按住说话，语音转文字、多轮对话、记忆存取与回放；对接自建服务端，地址可配 |
 | 危险声音识别 | 片内 AI 推理识别警笛 / 喇叭 / 警报等危险声音并触发提醒（主线走 `espdl_inference`） |
 | 跌倒检测 | QMI8658C 六轴数据 + CNN 模型，实时检测并告警 |
-| 在线音乐 | 服务端曲库拉流、流式解码与播放 |
+| 网易云音乐 | 手表扫码登录个人网易云账号，浏览今日推荐 / 我喜欢 / 我的歌单 / 最近播放，服务端拉流、手表流式解码播放 |
 | OTA 升级 | 双 OTA 槽位，支持 OneNET 与自建 HTTPS 清单，可选增量差分升级 |
 | 天气时间 | 心知天气 API 实时天气 + PCF85063 RTC 精准走时 |
 | 配网 | SoftAP 门户 + BLE Provisioning 双通道，凭据落 NVS |
@@ -85,7 +85,7 @@ idf.py -p <PORT> monitor
 |--------|------|------|
 | 天气 API Key | `main/services/weather/weather_http_client.c` | 当前为 `<YOUR_SENIVERSE_API_KEY>`，替换为你的心知天气 Key |
 | 手表服务端地址 | `menuconfig` → AI Memory Watch → Default watch endpoint base URL | 默认 `watch.example.com` 为占位符；运行时以 SoftAP 配网写入 NVS 的值为准 |
-| 音乐服务 | 配网 / NVS 配置 `base_url` 与 `device_id` | 仓库不含音乐服务端，需自备兼容协议的曲库服务 |
+| 音乐服务（网易云） | 配网 / NVS 配置 `base_url`、`device_id`、`device_token` | 仓库不含音乐服务端，需自建；网易云登录态与播放地址由服务端持有，手表只做扫码登录与音频流播放 |
 | OTA 服务器 | `menuconfig` → Standalone HTTPS OTA | 可选 OneNET，或自建 HTTPS 清单并填写 URL 与允许的 host |
 
 ### 配网
