@@ -1,0 +1,23 @@
+# Temporary Hermes-only canary configuration. Keep the real token outside the
+# repository and remove this entry after the local closed-loop test.
+mcp_servers:
+  watch_music_canary:
+    url: "http://host.docker.internal:8788/v1/music/mcp"
+    headers:
+      Authorization: "Bearer ${MUSIC_MCP_TOKEN}"
+    enabled: true
+    supports_parallel_tool_calls: false
+    tools:
+      include:
+        - music_search
+        - music_status
+        - music_play
+        - music_pause
+        - music_resume
+        - music_previous
+        - music_next
+        - music_stop
+        - music_set_mode
+        - music_set_volume
+      resources: false
+      prompts: false

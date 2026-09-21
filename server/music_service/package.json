@@ -1,0 +1,16 @@
+{
+  "name": "ai-memory-watch-music-service",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "4.39.0",
+    "qrcode": "1.5.4"
+  }
+}

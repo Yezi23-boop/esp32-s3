@@ -46,6 +46,8 @@
 ├── components/       # 板级驱动与能力组件（co5300_panel / touch_ft5x06 / qmi8658c /
 │                     #   axp2101 / pcf85063atl / sd_card / audio_codec / lvgl_port /
 │                     #   network_manager / espdl_inference ...）
+├── server/
+│   └── music_service/ # 网易云音乐服务端（需自建部署，见其 README）
 ├── assets/           # AI 字库索引
 ├── scripts/          # 构建脚本
 ├── .agents/skills/   # AI Agent 技能（见文末）
@@ -85,7 +87,7 @@ idf.py -p <PORT> monitor
 |--------|------|------|
 | 天气 API Key | `main/services/weather/weather_http_client.c` | 当前为 `<YOUR_SENIVERSE_API_KEY>`，替换为你的心知天气 Key |
 | 手表服务端地址 | `menuconfig` → AI Memory Watch → Default watch endpoint base URL | 默认 `watch.example.com` 为占位符；运行时以 SoftAP 配网写入 NVS 的值为准 |
-| 音乐服务（网易云） | 配网 / NVS 配置 `base_url`、`device_id`、`device_token` | 仓库不含音乐服务端，需自建；网易云登录态与播放地址由服务端持有，手表只做扫码登录与音频流播放 |
+| 音乐服务（网易云） | 配网 / NVS 配置 `base_url`、`device_id`、`device_token` | 服务端源码见 `server/music_service/`，需自行部署并配置设备 token；网易云登录态与播放地址由服务端持有，手表只做扫码登录与音频流播放 |
 | OTA 服务器 | `menuconfig` → Standalone HTTPS OTA | 可选 OneNET，或自建 HTTPS 清单并填写 URL 与允许的 host |
 
 ### 配网
