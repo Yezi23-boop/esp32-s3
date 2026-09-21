@@ -8,7 +8,7 @@
 
 | 方向 | 能力 |
 |------|------|
-| AI 语音助手 | 按住说话，语音转文字、多轮对话、记忆存取与回放；服务端地址可配 |
+| AI 语音助手（Hermes） | 按住说话，语音转文字、多轮对话、记忆存取与回放；对接自建服务端，地址可配 |
 | 危险声音识别 | 片内 AI 推理识别警笛 / 喇叭 / 警报等危险声音并触发提醒（主线走 `espdl_inference`） |
 | 跌倒检测 | QMI8658C 六轴数据 + CNN 模型，实时检测并告警 |
 | 在线音乐 | 服务端曲库拉流、流式解码与播放 |
@@ -45,7 +45,7 @@
 │       └── custom/   # 自定义页面、控制器与字库
 ├── components/       # 板级驱动与能力组件（co5300_panel / touch_ft5x06 / qmi8658c /
 │                     #   axp2101 / pcf85063atl / sd_card / audio_codec / lvgl_port /
-│                     #   network_manager / official_chat / espdl_inference ...）
+│                     #   network_manager / espdl_inference ...）
 ├── assets/           # AI 字库索引
 ├── scripts/          # 构建脚本
 ├── .agents/skills/   # AI Agent 技能（见文末）
@@ -87,7 +87,6 @@ idf.py -p <PORT> monitor
 | 手表服务端地址 | `menuconfig` → AI Memory Watch → Default watch endpoint base URL | 默认 `watch.example.com` 为占位符；运行时以 SoftAP 配网写入 NVS 的值为准 |
 | 音乐服务 | 配网 / NVS 配置 `base_url` 与 `device_id` | 仓库不含音乐服务端，需自备兼容协议的曲库服务 |
 | OTA 服务器 | `menuconfig` → Standalone HTTPS OTA | 可选 OneNET，或自建 HTTPS 清单并填写 URL 与允许的 host |
-| 小智服务 | `menuconfig` → Official Chat | 默认指向小智官方地址，通常无需修改 |
 
 ### 配网
 
@@ -125,6 +124,6 @@ idf.py -p <PORT> monitor
 - [ESP-IDF](https://github.com/espressif/esp-idf) — Espressif IoT 开发框架
 - [LVGL](https://github.com/lvgl/lvgl) — 轻量级图形库
 - [ESP-DL](https://github.com/espressif/esp-dl) — Espressif 深度学习推理库
-- [小智 AI](https://github.com/78/xiaozhi-esp32) — 语音助手交互与字库方案
+- [xiaozhi-fonts](https://components.espressif.com/components/78/xiaozhi-fonts) — 内嵌中文字库资源（Noto Sans 子集）
 - [Edge Impulse](https://www.edgeimpulse.com/) — 嵌入式机器学习平台（实验分支）
 - [LXGW WenKai](https://github.com/lxgw/LxgwWenKai) — 霞鹜文楷字体
