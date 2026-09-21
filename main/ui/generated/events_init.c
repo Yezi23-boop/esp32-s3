@@ -20,6 +20,7 @@
 #include "main_dropdown_controller.h"
 #include "memory_watch_controller.h"
 #include "mini_games_controller.h"
+#include "ota_maintenance_view.h"
 #include "ui_refresh_policy.h"
 static int32_t status_bar_y_pos;
 static int32_t start_y;
@@ -117,6 +118,8 @@ static void screen_main_show_function_page(void)
     }
 
     setup_scr_screen_main_function_page(&guider_ui);
+    /* 功能页在首次横滑时才创建，此时补齐独立 OTA 入口。 */
+    ota_maintenance_view_bind_entry();
     lv_obj_clear_flag(guider_ui.screen_main_tileview_1_main, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(guider_ui.screen_main_tileview_1_Function, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_x(guider_ui.screen_main_tileview_1_main, 0);

@@ -17,7 +17,6 @@
 #define TAG "audio_alert_player"
 #define ALERT_PLAYER_TASK_STACK_SIZE 4096U
 #define ALERT_PLAYER_TASK_PRIORITY 4U
-#define ALERT_PLAYER_VOLUME_PERCENT 75
 
 /*
  * 告警提示音播放器实现说明：
@@ -68,9 +67,8 @@ static void audio_alert_player_task(void *arg)
     }
     output_acquired = true;
 
-    (void)audio_codec_set_pa_enable(true);                     // 打开功放
-    (void)audio_codec_set_mute(false);                         // 取消静音
-    (void)audio_codec_set_volume(ALERT_PLAYER_VOLUME_PERCENT); // 设置告警播报音量
+    (void)audio_codec_set_pa_enable(true); // 打开功放
+    (void)audio_codec_set_mute(false);     // 音量为 0 时仍由 codec 音量保持静音
 
     ret = audio_codec_write(kTishiyinpinPcmData, pcm_bytes);
     if (ret != ESP_OK)

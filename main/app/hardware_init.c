@@ -1,7 +1,6 @@
 #include "hardware_init.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "features/audio/audio_app.h"
 #include "sd_manager.h"
 #include "audio_codec.h"
 #include "board_button.h"
@@ -102,14 +101,6 @@ esp_err_t hardware_init(void)
         ESP_LOGW(TAG, "DS2413 motor init failed: %s", esp_err_to_name(ret));
     }
 
-    /* 音频应用层先准备目录和控制入口；即使失败，也不阻断整机启动。 */
-    ESP_LOGI(TAG, "Initializing Audio SPIFFS...");
-    ret = audio_app_init();
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Audio SPIFFS init failed: %s", esp_err_to_name(ret));
-    }
-
     /*
      * 通用资源分区给 LVGL POSIX `A:` 盘符提供 `/resources` 根目录。
      * 挂载失败只影响运行时字体/图片/音频资源，不阻断基础 UI 启动。
@@ -138,7 +129,6 @@ esp_err_t hardware_init(void)
     else
     {
         ESP_LOGI(TAG, "Audio system initialized successfully");
-        audio_codec_set_volume(60);
     }
 
     /* 板级电源快照用于 UI 电量展示和后续功耗策略观察。 */

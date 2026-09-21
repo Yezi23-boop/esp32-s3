@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 #include "printf_esp32.h"
 #include "soc/soc.h"
 #include "soc/soc_caps.h"
@@ -10,6 +11,44 @@
 
 extern char _iram_start;
 extern char _iram_end;
+
+/**
+ * @brief 计算当前 target 的静态 IRAM 链接段总容量。
+ *
+ * ESP32-S3 的 `iram0_0_seg` 长度由 IDF 链接脚本按 cache 大小和 bootloader
+ * 预留区裁剪；旧的 `SOC_IRAM0_*_SEG_LEN` 宏在 S3 上不存在，不能因此打印
+ * `total: unknown`。这里复用链接脚本中的同一组边界常量，只用于诊断显示，
+ * 不改变任何真实内存布局。
+ */
+static size_t printf_esp32_get_static_iram_total(void)
+{
+    size_t total = 0;
+#if defined(SOC_IRAM0_0_SEG_LEN)
+    total += SOC_IRAM0_0_SEG_LEN;
+#endif
+#if defined(SOC_IRAM0_2_SEG_LEN)
+    total += SOC_IRAM0_2_SEG_LEN;
+#endif
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && \
+    defined(CONFIG_ESP32S3_INSTRUCTION_CACHE_SIZE)
+    if (total == 0)
+    {
+        const size_t sram_iram_end = 0x403CB700U;
+        const size_t icache_size = 0x8000U;
+        const size_t i_d_sram_offset =
+            (size_t)(SOC_DIRAM_IRAM_LOW - SOC_DIRAM_DRAM_LOW);
+        const size_t sram_dram_end = sram_iram_end - i_d_sram_offset;
+        const size_t i_d_sram_size =
+            sram_dram_end - (size_t)SOC_DIRAM_DRAM_LOW;
+        total = i_d_sram_size + icache_size -
+                (size_t)CONFIG_ESP32S3_INSTRUCTION_CACHE_SIZE;
+    }
+#endif
+
+    return total;
+}
+
 /**
  * @brief 打印ESP32系统内存统计信息
  * @details 显示内部RAM和PSRAM的详细使用情况，包括LVGL内存池状态
@@ -33,13 +72,7 @@ void printf_esp32_memory_stats(void)
     size_t iram_heap_used = iram_heap_total - iram_heap_free;           // IRAM 堆已用容量（字节）
 
     size_t iram_text_used = (size_t)(&_iram_end - &_iram_start);
-    size_t iram_text_total = 0;
-#if defined(SOC_IRAM0_0_SEG_LEN)
-    iram_text_total += SOC_IRAM0_0_SEG_LEN;
-#endif
-#if defined(SOC_IRAM0_2_SEG_LEN)
-    iram_text_total += SOC_IRAM0_2_SEG_LEN;
-#endif
+    size_t iram_text_total = printf_esp32_get_static_iram_total();
 
     // 3. 以 ESP-IDF 日志格式打印统计结果（等级：INFO，标签：TAG）
     ESP_LOGI(" ", "┌─────────────────────────────"); // 日志标题

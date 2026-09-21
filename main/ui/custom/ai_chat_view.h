@@ -7,7 +7,7 @@
 
 #include "esp_err.h"
 #include "lvgl.h"
-#include "services/network_service.h"
+#include "services/network/network_service.h"
 #include "services/official_chat_service.h"
 
 #ifdef __cplusplus

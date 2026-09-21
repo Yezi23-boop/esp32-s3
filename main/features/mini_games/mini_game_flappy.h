@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define FLAPPY_MAX_PIPES 3
-#define FLAPPY_PLAY_AREA_H 340
-#define FLAPPY_PLAY_AREA_W 360
+#define FLAPPY_PLAY_AREA_H 420
+#define FLAPPY_PLAY_AREA_W 410
 #define FLAPPY_PIPE_WIDTH 50
 #define FLAPPY_BIRD_X 80
 #define FLAPPY_BIRD_SIZE 20
@@ -27,6 +27,7 @@ typedef struct {
     float bird_y;
     float bird_vy;
     uint32_t score;
+    bool started;
     bool game_over;
     uint32_t rng_state;
     flappy_pipe_t pipes[FLAPPY_MAX_PIPES];
@@ -39,6 +40,7 @@ void mini_game_flappy_jump(mini_game_flappy_t *game);
 void mini_game_flappy_step(mini_game_flappy_t *game);
 uint32_t mini_game_flappy_get_score(const mini_game_flappy_t *game);
 bool mini_game_flappy_is_game_over(const mini_game_flappy_t *game);
+bool mini_game_flappy_is_started(const mini_game_flappy_t *game);
 
 #ifdef __cplusplus
 }

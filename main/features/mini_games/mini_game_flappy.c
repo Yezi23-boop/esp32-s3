@@ -49,6 +49,7 @@ void mini_game_flappy_reset(mini_game_flappy_t *game, uint32_t seed)
     game->bird_y = (float)(FLAPPY_PLAY_AREA_H / 2);
     game->bird_vy = 0.0f;
     game->score = 0;
+    game->started = false;
     game->game_over = false;
     game->frame_count = 0;
 
@@ -63,12 +64,13 @@ void mini_game_flappy_jump(mini_game_flappy_t *game)
     if (game == NULL || game->game_over) {
         return;
     }
+    game->started = true;
     game->bird_vy = kJumpImpulse;
 }
 
 void mini_game_flappy_step(mini_game_flappy_t *game)
 {
-    if (game == NULL || game->game_over) {
+    if (game == NULL || game->game_over || !game->started) {
         return;
     }
 
@@ -145,4 +147,9 @@ uint32_t mini_game_flappy_get_score(const mini_game_flappy_t *game)
 bool mini_game_flappy_is_game_over(const mini_game_flappy_t *game)
 {
     return game != NULL ? game->game_over : true;
+}
+
+bool mini_game_flappy_is_started(const mini_game_flappy_t *game)
+{
+    return game != NULL && game->started;
 }

@@ -53,6 +53,129 @@ config OFFICIAL_CHAT_UDP_AUDIO_STALL_TIMEOUT_MS
 
 endmenu
 
+menu "Standalone HTTPS OTA"
+
+choice OTA_SERVICE_SOURCE
+    prompt "OTA source"
+    default OTA_SOURCE_ONENET
+    help
+        Select the protocol provider used by the unified OTA service. The UI
+        and the three-step service flow are identical for both sources.
+
+config OTA_SOURCE_ONENET
+    bool "OneNET"
+
+config OTA_SOURCE_REMOTE_MANIFEST
+    bool "Self-hosted HTTPS manifest"
+
+endchoice
+
+config OTA_SERVICE_REMOTE_MANIFEST_URL
+    string "Remote OTA manifest URL"
+    depends on OTA_SOURCE_REMOTE_MANIFEST
+    default "https://watch.example.com/v1/watch/ota/manifest?channel=stable"
+    help
+        HTTPS manifest endpoint published by the remote OTA server.
+
+config OTA_SERVICE_REMOTE_ALLOWED_HOST
+    string "Remote OTA allowed host"
+    depends on OTA_SOURCE_REMOTE_MANIFEST
+    default "watch.example.com"
+    help
+        Exact host portion accepted in both the manifest URL and image URL.
+
+config OTA_SERVICE_TEST_FAULT_MODE
+    int "OTA test fault mode"
+    default 0
+    range 0 3
+    help
+        Development-only OTA fault injection: 0 none, 1 abort at 20%,
+        2 abort at 50%, 3 abort at 90%. Keep 0 in product images.
+
+config OTA_SERVICE_TEST_RESTART_HOLD_MS
+    int "OTA finish-to-restart hold (ms)"
+    default 0
+    range 0 120000
+    help
+        Hold after esp_https_ota_finish() and before esp_restart() for
+        controlled reset/power-loss testing. Keep 0 in product images.
+
+config OTA_BOOT_CHECK_TEST_HOLD_MS
+    int "OTA pending verify hold (ms)"
+    default 0
+    range 0 120000
+    help
+        Hold after local PENDING_VERIFY checks and before marking valid, so a
+        dedicated test image can be reset in that window. Keep 0 in products.
+
+config OTA_BOOT_CHECK_TEST_FORCE_FAIL
+    bool "Force OTA pending verify local check failure"
+    default n
+    help
+        Force the local PENDING_VERIFY boot check to fail and exercise IDF
+        rollback. Keep disabled in product images.
+
+config OTA_SERVICE_BOARD_TEST
+    bool "Run standalone OTA board test"
+    default n
+    help
+        Start one explicit standalone OTA test after Wi-Fi service readiness.
+        It is for a dedicated test image only; normal boot never fetches a
+        manifest or writes an OTA slot.
+
+config OTA_SERVICE_BOARD_TEST_START_DELAY_MS
+    int "OTA board test start delay (ms)"
+    depends on OTA_SERVICE_BOARD_TEST
+    default 30000
+    range 1000 120000
+    help
+        Delay after boot before the test waits for Wi-Fi and TLS time. This
+        also lets boot-time HTTPS probes finish before the one-shot test.
+
+config OTA_DELTA_ENABLED
+    bool "Enable delta OTA (standalone manifest delta fields)"
+    default n
+    help
+        Apply delta patches from the standalone manifest when its optional
+        delta fields are present and complete. Keep disabled in product images
+        unless the server publishes verified patches; fallback to full image
+        on any delta failure.
+
+config OTA_DELTA_MAX_RETRY
+    int "Delta OTA max retry count (fallback after)"
+    depends on OTA_DELTA_ENABLED
+    default 3
+    range 0 5
+    help
+        Number of retries for a failed delta apply before falling back to the
+        full-image path. 0 disables retries and falls back immediately.
+
+config OTA_DELTA_FEED_BUFFER_BYTES
+    int "Delta OTA patch feed buffer size (bytes)"
+    depends on OTA_DELTA_ENABLED
+    default 8192
+    range 1024 16384
+    help
+        Per-chunk buffer used to stream the downloaded patch into the
+        esp_delta_ota engine. Allocated from PSRAM when available.
+
+config OTA_METRICS_ENABLED
+    bool "Enable OTA metrics"
+    default n
+    help
+        Persist OTA stage results only in dedicated diagnostics builds.
+
+config OTA_METRICS_LOG_COUNT
+    int "OTA metrics recent-result log count"
+    depends on OTA_METRICS_ENABLED
+    default 10
+    range 1 50
+    help
+        Number of recent OTA upgrade results persisted to NVS in a ring
+        buffer by ota_metrics.
+
+endmenu
+
 menu "AI Memory Watch"
 
 config MEMORY_WATCH_DEFAULT_ENDPOINT_ENABLED
@@ -140,17 +263,34 @@ config MEMORY_WATCH_WEBSOCKET_ENABLED
         conversations. The existing HTTP voice-command path remains available
         as a rollback route during development.
 
-config RUNTIME_RESOURCE_GATE_BOARD_TEST
-    bool "Run runtime resource gate board stress test"
+config MUSIC_SERVICE_BOARD_TEST
+    bool "Run online music fixed-stream board test"
     default n
     help
-        Run a one-shot board-side stress sequence after boot to exercise the
-        foreground runtime gate, background HTTPS gate, Hermes foreground
-        owner, Safety Monitor yield path, and BLE quiet-window resource model.
+        Start one fixed-stream playback test after network service readiness.
+        This is for a dedicated test image only; normal firmware never starts
+        music automatically.
+
+config MUSIC_SERVICE_BOARD_TEST_START_DELAY_MS
+    int "Music board test start delay (ms)"
+    depends on MUSIC_SERVICE_BOARD_TEST
+    default 20000
+    range 1000 120000
+    help
+        Delay before the fixed-stream playback test starts, allowing boot-time
+        HTTPS probes and the UI/network owners to settle.
+
+config RUNTIME_RESOURCE_GATE_BOARD_TEST
+    bool "Run runtime coordinator board state-machine test"
+    default n
+    help
+        Run a one-shot board-side sequence with simulated participants to
+        exercise request coverage, stale ACK, rejection, timeout, grant
+        failure, and rollback fail-closed behavior.
         Keep disabled for normal images.
 
 config RUNTIME_RESOURCE_GATE_BOARD_TEST_START_DELAY_MS
-    int "Runtime resource gate board test start delay (ms)"
+    int "Runtime coordinator board test start delay (ms)"
     depends on RUNTIME_RESOURCE_GATE_BOARD_TEST
     default 12000
     range 1000 120000
@@ -158,14 +298,5 @@ config RUNTIME_RESOURCE_GATE_BOARD_TEST_START_DELAY_MS
         Delay before the one-shot test starts. This gives UI, networking and
         Memory Watch workers time to initialize before the test creates
         resource pressure.
-
-config RUNTIME_RESOURCE_GATE_BOARD_TEST_ENABLE_REAL_BLE_TOGGLE
-    bool "Allow board test to toggle BLE"
-    depends on RUNTIME_RESOURCE_GATE_BOARD_TEST
-    default n
-    help
-        Also call network_service_set_ble_enabled(true/false) during the test.
-        This can start the BLE controller and consume internal RAM, so keep it
-        disabled unless you explicitly want the high-pressure BLE path.
 
 endmenu

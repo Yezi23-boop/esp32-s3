@@ -44,6 +44,7 @@ extern "C"
         AUDIO_CODEC_OWNER_AUDIO_RECORDER,       /**< 前台本地录音链路。 */
         AUDIO_CODEC_OWNER_OFFICIAL_CHAT,        /**< 官方聊天/语音链路。 */
         AUDIO_CODEC_OWNER_HERMES,               /**< AI Memory Watch / Hermes 语音链路。 */
+        AUDIO_CODEC_OWNER_MUSIC_PLAYER,         /**< 在线音乐流播放链路。 */
     } audio_codec_owner_t;
 
     /** 音频独占会话只读快照。 */
@@ -77,6 +78,35 @@ extern "C"
      */
     esp_err_t audio_codec_get_session_snapshot(
         audio_codec_session_snapshot_t *snapshot);
+
+    /**
+     * @brief 获取会话状态的非阻塞缓存快照。
+     *
+     * 与 `audio_codec_get_session_snapshot()` 不同，本接口不获取资源 mutex，
+     * 只读取由会话变更路径维护的缓存副本，适合低频策略任务在无锁上下文读取。
+     *
+     * @param[out] snapshot 输出快照。
+     * @return `ESP_OK` 表示读取成功；`ESP_ERR_INVALID_ARG` 表示输出参数为空。
+     */
+    esp_err_t audio_codec_get_cached_session_snapshot(
+        audio_codec_session_snapshot_t *snapshot);
+
+    /** 会话变更回调；真实动作由注册方在自己的上下文执行，回调内不允许阻塞。 */
+    typedef void (*audio_codec_session_change_cb_t)(void *user_ctx);
+
+    /**
+     * @brief 安装会话变更通知回调。
+     *
+     * 该回调在会话 acquire/release 成功的资源 mutex 持有路径内被调用，只允许
+     * 复制状态或向其他任务发送通知，不允许执行音频/硬件/网络等阻塞操作。
+     * 重复安装会覆盖之前的回调，返回 `ESP_OK`。
+     *
+     * @param[in] callback 回调函数，可为 NULL 表示卸载。
+     * @param[in] user_ctx 回调上下文。
+     * @return `ESP_OK` 表示安装成功。
+     */
+    esp_err_t audio_codec_set_session_change_callback(
+        audio_codec_session_change_cb_t callback, void *user_ctx);
 
     /**
      * @brief 初始化音频 codec 子系统。
@@ -174,6 +204,17 @@ extern "C"
      * @return `ESP_OK` 表示成功；其他错误表示参数非法或底层设置失败。
      */
     esp_err_t audio_codec_set_volume(int volume);
+
+    /**
+     * @brief 设置并持久化用户扬声器音量。
+     *
+     * 音量立即应用到播放 codec，并在值发生变化时写入 NVS；下次
+     * `audio_codec_init()` 会自动恢复该值。
+     *
+     * @param[in] volume 音量百分比，范围为 0~100。
+     * @return `ESP_OK` 表示硬件和 NVS 均更新成功；其他错误表示设置或保存失败。
+     */
+    esp_err_t audio_codec_set_volume_preference(int volume);
 
     /**
      * @brief 获取当前缓存音量。

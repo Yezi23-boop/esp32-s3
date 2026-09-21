@@ -22,6 +22,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "i2c_manager.h"
+#include "nvs.h"
 
 static const char *TAG = "audio_codec";
 
@@ -34,7 +35,11 @@ static const audio_codec_data_if_t *s_data_if = NULL;          // I2S 数据接�
 static esp_codec_dev_handle_t s_playback_dev = NULL;           // 播放设备句柄。
 static esp_codec_dev_handle_t s_record_dev = NULL;             // 录音设备句柄。
 
-static int s_current_volume = 30;                                              // 当前缓存音量，范围为 0~100。
+static const int kDefaultVolumePercent = 60;                                  // NVS 缺失或非法时使用的默认音量。
+static const char *kVolumeNvsNamespace = "audio_codec";                       // 用户音量偏好的 NVS 命名空间。
+static const char *kVolumeNvsKey = "volume";                                 // 0~100 音量百分比键。
+static int s_current_volume = 60;                                              // 当前已应用音量，范围为 0~100。
+static int s_persisted_volume = 60;                                            // 最近成功读取或写入 NVS 的音量。
 static int s_input_sample_rate = AUDIO_PLATFORM_HW_SAMPLE_RATE;                // 录音采样率，单位为 Hz。
 static int s_output_sample_rate = AUDIO_PLATFORM_HW_SAMPLE_RATE;               // 播放采样率，单位为 Hz。
 static int s_physical_rx_slots = 4;                                            // RX 物理时隙数，当前走 TDM。
@@ -52,10 +57,79 @@ static audio_codec_owner_t s_output_session_owner = AUDIO_CODEC_OWNER_SYSTEM; //
 static bool s_input_session_active = false;                              // true 表示 I2S RX/ES7210 已被某个运行时占用。
 static bool s_output_session_active = false;                             // true 表示 I2S TX/ES8311 已被某个播放者占用。
 
+/* 会话状态缓存：由资源 mutex 持有路径维护，供无锁低频策略读取，避免阻塞等待。 */
+static audio_codec_session_snapshot_t s_cached_session_snapshot = {0};
+static portMUX_TYPE s_cache_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* 会话变更回调：注册发生在 service 初始化阶段，运行期不变，因此无需额外加锁。 */
+static audio_codec_session_change_cb_t s_session_change_cb = NULL;
+static void *s_session_change_ctx = NULL;
+
+/**
+ * @brief 在资源 mutex 内刷新会话缓存并通知变更回调。
+ *
+ * 只在 acquire/release 成功路径调用，此时调用方持有资源 mutex；回调只允许
+ * 复制状态或发送通知，不允许阻塞。
+ */
+static void audio_codec_publish_session_change(void)
+{
+    audio_codec_session_snapshot_t snapshot = {
+        .input_active = s_input_session_active,
+        .input_owner = s_input_session_owner,
+        .output_active = s_output_session_active,
+        .output_owner = s_output_session_owner,
+    };
+    taskENTER_CRITICAL(&s_cache_lock);
+    s_cached_session_snapshot = snapshot;
+    taskEXIT_CRITICAL(&s_cache_lock);
+
+    if (s_session_change_cb != NULL)
+    {
+        s_session_change_cb(s_session_change_ctx);
+    }
+}
+
 #define ES8311_CODEC_ADDR 0x30
 #define ES7210_ADC_ADDR 0x80
 
 static esp_err_t audio_codec_deinit_hardware_locked(void);
+
+/**
+ * @brief 从 NVS 恢复用户音量，调用方必须持有资源 mutex。
+ *
+ * NVS 不可用、键不存在或数值越界时继续使用 60%，避免音量偏好阻断
+ * codec 基础初始化。
+ */
+static void audio_codec_load_volume_preference_locked(void)
+{
+    uint8_t stored_volume = (uint8_t)kDefaultVolumePercent;
+    nvs_handle_t handle = 0;
+    esp_err_t ret = nvs_open(kVolumeNvsNamespace, NVS_READONLY, &handle);
+    if (ret == ESP_OK)
+    {
+        ret = nvs_get_u8(handle, kVolumeNvsKey, &stored_volume);
+        nvs_close(handle);
+    }
+
+    if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND)
+    {
+        ESP_LOGW(TAG, "Failed to load volume preference: %s",
+                 esp_err_to_name(ret));
+    }
+    if (ret != ESP_OK || stored_volume > 100U)
+    {
+        if (ret == ESP_OK)
+        {
+            ESP_LOGW(TAG, "Ignore invalid stored volume: %u",
+                     (unsigned int)stored_volume);
+        }
+        stored_volume = (uint8_t)kDefaultVolumePercent;
+    }
+
+    s_current_volume = (int)stored_volume;
+    s_persisted_volume = (int)stored_volume;
+    ESP_LOGI(TAG, "Speaker volume restored: %d%%", s_current_volume);
+}
 
 /**
  * @brief 返回音频 owner 的日志名称。
@@ -83,6 +157,8 @@ static const char *audio_codec_owner_name(audio_codec_owner_t owner)
         return "official_chat";
     case AUDIO_CODEC_OWNER_HERMES:
         return "hermes";
+    case AUDIO_CODEC_OWNER_MUSIC_PLAYER:
+        return "music_player";
     default:
         return "unknown";
     }
@@ -686,6 +762,7 @@ esp_err_t audio_codec_init(void)
         return ESP_OK;
     }
 
+    audio_codec_load_volume_preference_locked();
     ret = audio_codec_init_hardware_locked();
     if (ret == ESP_OK)
     {
@@ -812,6 +889,7 @@ static esp_err_t audio_codec_acquire_session(bool *active,
             *current_owner = owner;
             ESP_LOGI(TAG, "%s session acquired by %s",
                      session_name, audio_codec_owner_name(owner));
+            audio_codec_publish_session_change();
             audio_codec_unlock_resources();
             return ESP_OK;
         }
@@ -895,6 +973,7 @@ static esp_err_t audio_codec_release_session(bool *active,
     *current_owner = AUDIO_CODEC_OWNER_SYSTEM;
     ESP_LOGI(TAG, "%s session released by %s",
              session_name, audio_codec_owner_name(owner));
+    audio_codec_publish_session_change();
     audio_codec_unlock_resources();
     return ESP_OK;
 }
@@ -975,6 +1054,34 @@ esp_err_t audio_codec_get_session_snapshot(
     snapshot->output_owner = s_output_session_owner;
 
     audio_codec_unlock_resources();
+    return ESP_OK;
+}
+
+esp_err_t audio_codec_get_cached_session_snapshot(
+    audio_codec_session_snapshot_t *snapshot)
+{
+    if (snapshot == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    taskENTER_CRITICAL(&s_cache_lock);
+    *snapshot = s_cached_session_snapshot;
+    taskEXIT_CRITICAL(&s_cache_lock);
+    return ESP_OK;
+}
+
+esp_err_t audio_codec_set_session_change_callback(
+    audio_codec_session_change_cb_t callback, void *user_ctx)
+{
+    if (s_session_change_cb != NULL && callback != s_session_change_cb)
+    {
+        /* 覆盖既有回调会让原注册方的会话变更通知静默失效；只打日志防呆，
+         * 不拒绝安装，避免破坏启动顺序。 */
+        ESP_LOGW(TAG, "session change callback replaced");
+    }
+    s_session_change_cb = callback;
+    s_session_change_ctx = user_ctx;
     return ESP_OK;
 }
 
@@ -1104,16 +1211,74 @@ esp_err_t audio_codec_flush_output(void)
  */
 esp_err_t audio_codec_set_volume(int volume)
 {
-    if (s_playback_dev == NULL || volume < 0 || volume > 100)
+    if (volume < 0 || volume > 100)
     {
         return ESP_ERR_INVALID_ARG;
     }
+    esp_err_t ret = audio_codec_lock_resources(UINT32_MAX);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    if (s_playback_dev == NULL)
+    {
+        audio_codec_unlock_resources();
+        return ESP_ERR_INVALID_STATE;
+    }
     if (esp_codec_dev_set_out_vol(s_playback_dev, volume) != ESP_CODEC_DEV_OK)
     {
+        audio_codec_unlock_resources();
         return ESP_FAIL;
     }
     s_current_volume = volume;
+    audio_codec_unlock_resources();
     return ESP_OK;
+}
+
+/**
+ * @brief 设置并持久化用户扬声器音量。
+ * @param[in] volume 音量百分比，范围为 0~100。
+ * @return `ESP_OK` 表示硬件与 NVS 均更新成功。
+ */
+esp_err_t audio_codec_set_volume_preference(int volume)
+{
+    esp_err_t ret = audio_codec_set_volume(volume);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = audio_codec_lock_resources(UINT32_MAX);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    if (s_persisted_volume == volume)
+    {
+        audio_codec_unlock_resources();
+        return ESP_OK;
+    }
+
+    nvs_handle_t handle = 0;
+    ret = nvs_open(kVolumeNvsNamespace, NVS_READWRITE, &handle);
+    if (ret == ESP_OK)
+    {
+        ret = nvs_set_u8(handle, kVolumeNvsKey, (uint8_t)volume);
+    }
+    if (ret == ESP_OK)
+    {
+        ret = nvs_commit(handle);
+    }
+    if (handle != 0)
+    {
+        nvs_close(handle);
+    }
+    if (ret == ESP_OK)
+    {
+        s_persisted_volume = volume;
+    }
+    audio_codec_unlock_resources();
+    return ret;
 }
 
 /**
@@ -1123,11 +1288,22 @@ esp_err_t audio_codec_set_volume(int volume)
  */
 esp_err_t audio_codec_get_volume(int *volume)
 {
-    if (s_playback_dev == NULL || volume == NULL)
+    if (volume == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
+    esp_err_t ret = audio_codec_lock_resources(UINT32_MAX);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    if (s_playback_dev == NULL)
+    {
+        audio_codec_unlock_resources();
+        return ESP_ERR_INVALID_STATE;
+    }
     *volume = s_current_volume;
+    audio_codec_unlock_resources();
     return ESP_OK;
 }
 

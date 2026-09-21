@@ -179,7 +179,7 @@ danger_detection_view_t *danger_detection_view_create(
     view->safety_monitor_label = lv_label_create(view->safety_monitor_row);
     lv_label_set_text(view->safety_monitor_label, "安全监听");
     lv_obj_set_style_text_font(view->safety_monitor_label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+                               &lv_font_montserrat_lxgw_common_5500_16_4,
                                0);
     lv_obj_set_style_text_color(view->safety_monitor_label,
                                 lv_color_hex(0x111827), 0);
@@ -215,7 +215,7 @@ danger_detection_view_t *danger_detection_view_create(
     view->status_label = lv_label_create(view->content_layer);
     lv_label_set_text(view->status_label, "未开启");
     lv_obj_set_style_text_font(view->status_label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+                               &lv_font_montserrat_lxgw_common_5500_16_4,
                                0);
     lv_obj_align(view->status_label, LV_ALIGN_TOP_MID, 0, 52);
 
@@ -238,7 +238,7 @@ danger_detection_view_t *danger_detection_view_create(
     view->sensitivity_title_label = lv_label_create(view->content_layer);
     lv_label_set_text(view->sensitivity_title_label, "灵敏度 · 日常推荐");
     lv_obj_set_style_text_font(view->sensitivity_title_label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+                               &lv_font_montserrat_lxgw_common_5500_16_4,
                                0);
     lv_obj_set_style_text_color(view->sensitivity_title_label,
                                 lv_color_hex(0x111827), 0);
@@ -279,7 +279,7 @@ danger_detection_view_t *danger_detection_view_create(
         lv_label_set_text(view->sensitivity_labels[i], kSensitivityTexts[i]);
         lv_obj_set_style_text_font(
             view->sensitivity_labels[i],
-            &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, 0);
+            &lv_font_montserrat_lxgw_common_5500_16_4, 0);
         lv_obj_set_style_text_color(view->sensitivity_labels[i],
                                     lv_color_hex(0x374151), 0);
         lv_obj_set_style_text_color(view->sensitivity_labels[i],
@@ -313,7 +313,7 @@ danger_detection_view_t *danger_detection_view_create(
     lv_label_set_text(view->mic_test_button_label, "测麦克风");
     lv_obj_set_style_text_font(
         view->mic_test_button_label,
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, 0);
+        &lv_font_montserrat_lxgw_common_5500_16_4, 0);
     lv_obj_set_style_text_color(view->mic_test_button_label,
                                 lv_color_white(), 0);
     lv_obj_center(view->mic_test_button_label);
@@ -323,7 +323,7 @@ danger_detection_view_t *danger_detection_view_create(
     lv_obj_set_width(view->mic_test_status_label, 62);
     lv_obj_set_style_text_font(
         view->mic_test_status_label,
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, 0);
+        &lv_font_montserrat_lxgw_common_5500_16_4, 0);
     lv_obj_set_style_text_color(view->mic_test_status_label,
                                 lv_color_hex(0x6b7280), 0);
 

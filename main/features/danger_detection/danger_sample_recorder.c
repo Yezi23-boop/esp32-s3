@@ -1042,6 +1042,11 @@ bool danger_sample_recorder_is_recording(void)
     return s_recorder.is_recording;
 }
 
+bool danger_sample_recorder_is_initialized(void)
+{
+    return s_recorder.is_initialized;
+}
+
 danger_sample_pcm_tap_callback_t danger_sample_recorder_get_pcm_callback(void)
 {
     return pcm_tap_callback;

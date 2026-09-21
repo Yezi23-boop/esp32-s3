@@ -107,7 +107,7 @@ static void display_alert_ensure_low_battery_overlay_created(void)
     lv_obj_set_width(label, 232);
     lv_obj_set_style_text_color(label, lv_color_hex(0xfff4c2), 0);
     lv_obj_set_style_text_font(label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_22_4,
+                               &lv_font_montserrat_lxgw_common_5500_22_4,
                                0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);

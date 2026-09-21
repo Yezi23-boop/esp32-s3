@@ -91,6 +91,16 @@ void watch_nc_notify_hermes_reply(const char *request_id);
  */
 void watch_nc_set_inbox_list_active(bool active);
 
+/**
+ * @brief 查询全局通知气泡当前是否可见。
+ *
+ * 该只读接口供前台交互页面决定是否自动暂停，不推进通知状态机。
+ * 必须在 LVGL task 内调用。
+ *
+ * @return true 表示气泡正在遮挡当前页面。
+ */
+bool watch_nc_is_visible(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,7 +5,9 @@
 #include <unistd.h>
 
 #include <esp_crt_bundle.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <freertos/idf_additions.h>
 
 namespace official_chat {
 
@@ -16,6 +18,7 @@ constexpr EventBits_t kReceiveTaskExitBit = BIT0;
 constexpr TickType_t kReceiveTaskStopTimeoutTicks = pdMS_TO_TICKS(10000);
 constexpr size_t kReceiveBufferSize = 1500;
 constexpr int kSocketTimeoutMs = 200;
+constexpr configSTACK_DEPTH_TYPE kReceiveTaskStackBytes = 4096;
 
 }  // namespace
 
@@ -77,7 +80,9 @@ bool EspSsl::Connect(const std::string &host, int port) {
   if (event_group_ != nullptr) {
     xEventGroupClearBits(event_group_, kReceiveTaskExitBit);
   }
-  if (xTaskCreate(
+  /* TLS 握手后的长期接收循环不经过 DMA/ISR；栈放 PSRAM，给 mbedTLS
+   * 和同时运行的录音/HTTPS 保留 internal RAM 连续块。 */
+  if (xTaskCreateWithCaps(
           [](void *arg) {
             auto *self = static_cast<EspSsl *>(arg);
             self->ReceiveTask();
@@ -85,11 +90,20 @@ bool EspSsl::Connect(const std::string &host, int port) {
               xEventGroupSetBits(self->event_group_, kReceiveTaskExitBit);
             }
             self->receive_task_handle_ = nullptr;
-            vTaskDelete(nullptr);
+            vTaskDeleteWithCaps(nullptr);
           },
-          "oc_ssl_rx", 4096, this, 1, &receive_task_handle_) != pdPASS) {
+          "oc_ssl_rx", kReceiveTaskStackBytes, this, 1, &receive_task_handle_,
+          MALLOC_CAP_SPIRAM) != pdPASS) {
     last_error_ = ENOMEM;
-    ESP_LOGE(kTag, "failed to create ssl receive task");
+    ESP_LOGE(kTag,
+             "failed to create ssl receive task: internal_free=%u "
+             "internal_largest=%u spiram_free=%u spiram_largest=%u",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(
+                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(
+                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     connected_ = false;
     esp_tls_conn_destroy(tls_client_);
     tls_client_ = nullptr;

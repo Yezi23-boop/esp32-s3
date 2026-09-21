@@ -24,7 +24,8 @@
  *
  * CO5300面板使用QSPI接口，根据实际显示效果调整此配置
  */
-#define LV_PORT_BYTE_SWAP_ENABLE 1
+/* 路线 B：显示格式为 RGB565_SWAPPED，flush 不再手动 swap（真机对照已验证）。 */
+#define LV_PORT_BYTE_SWAP_ENABLE 0
 
 /* ========== 简化传输优化配置 ========== */
 

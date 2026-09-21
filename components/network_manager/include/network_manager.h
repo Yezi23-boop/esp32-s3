@@ -136,6 +136,16 @@ esp_err_t network_manager_start_ble_provisioning(void);
 esp_err_t network_manager_start_softap_provisioning(void);
 
 /**
+ * @brief 停止当前 BLE 或 SoftAP provisioning 会话。
+ *
+ * 该接口只收口 active provisioning transport，不改变已保存 Wi-Fi 凭据；主要由
+ * network service owner 在 Wi-Fi 管理页退出或配网完成后的生命周期收尾中调用。
+ *
+ * @return `ESP_OK` 表示已停止或本就空闲；其他错误表示 stop/deinit 失败。
+ */
+esp_err_t network_manager_stop_provisioning(void);
+
+/**
  * @brief 设置 BLE 总开关偏好。
  *
  * 该接口现在只表达“手机蓝牙开关”式语义：

@@ -24,8 +24,24 @@ struct ai_chat_view {
     lv_obj_t *voice_btn;
     lv_obj_t *voice_label;
     bool voice_pressed;
+    bool font_assets_error;
     const ai_chat_view_config_t *config;
 };
+
+static void ai_chat_view_show_font_error(ai_chat_view_t *view) {
+    view->screen = lv_obj_create(NULL);
+    lv_obj_set_size(view->screen, 410, 502);
+    lv_obj_set_style_bg_color(view->screen, lv_color_hex(0xfbfbfa), 0);
+    lv_obj_set_style_bg_opa(view->screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(view->screen, 0, 0);
+    lv_obj_clear_flag(view->screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(view->screen);
+    lv_label_set_text(label, "FONT ASSET ERROR");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x9f2f2d), 0);
+    lv_obj_center(label);
+}
 
 typedef enum {
     AI_CHAT_BUBBLE_SYSTEM = 0,
@@ -173,7 +189,7 @@ static lv_obj_t *ai_chat_view_create_bubble(lv_obj_t *parent,
         lv_obj_set_style_max_width(text_label, 230, 0);
     }
     lv_label_set_long_mode(text_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(text_label, ui_font_assets_body(), 0);
+    lv_obj_set_style_text_font(text_label, ui_font_assets_text(), 0);
     lv_obj_set_style_text_line_space(text_label, 4, 0);
 
     if (kind == AI_CHAT_BUBBLE_SYSTEM) {
@@ -249,7 +265,7 @@ static lv_obj_t *ai_chat_view_append_placeholder(ai_chat_view_t *view,
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(0x787774), 0);
-    lv_obj_set_style_text_font(label, ui_font_assets_body(), 0);
+    lv_obj_set_style_text_font(label, ui_font_assets_text(), 0);
     lv_obj_set_style_text_line_space(label, 4, 0);
     return row;
 }
@@ -376,17 +392,18 @@ static void ai_chat_view_apply_footer_layout(ai_chat_view_t *view) {
 }
 
 /**
- * @brief 创建 AI 聊天页面并提前准备字体 seam。
+ * @brief 创建 AI 聊天页面并提前准备字体资源。
  *
- * 字体主路径已经随 78/xiaozhi-fonts 编译进固件，assets 分区只负责运行时
- * 替换；这里提前初始化 seam，避免后续创建 label 时才触发分区 mmap。
+ * AI 正文使用 assets 分区中的 Noto common20；这里提前初始化并校验两个
+ * runtime CBin，避免创建中文 label 后才发现 assets 不完整。
  *
  * @param config 页面初始文案和按钮回调配置，传 NULL 时使用默认配置。
  * @return 创建成功返回页面对象，内存不足时返回 NULL。
  */
 ai_chat_view_t *ai_chat_view_create(const ai_chat_view_config_t *config) {
     esp_err_t font_assets_ret = ui_font_assets_init();
-    if (font_assets_ret != ESP_OK) {
+    const bool font_assets_ready = ui_font_assets_ready();
+    if (font_assets_ret != ESP_OK || !font_assets_ready) {
         ESP_LOGW(TAG, "ui_font_assets_init failed: %s",
                  esp_err_to_name(font_assets_ret));
     }
@@ -410,6 +427,12 @@ ai_chat_view_t *ai_chat_view_create(const ai_chat_view_config_t *config) {
         .user_data = NULL,
     };
     view->config = config != NULL ? config : &kDefaultConfig;
+
+    if (font_assets_ret != ESP_OK || !font_assets_ready) {
+        view->font_assets_error = true;
+        ai_chat_view_show_font_error(view);
+        return view;
+    }
 
     view->screen = lv_obj_create(NULL);
     lv_obj_set_size(view->screen, 410, 502);
@@ -478,7 +501,7 @@ ai_chat_view_t *ai_chat_view_create(const ai_chat_view_config_t *config) {
     view->voice_label = lv_label_create(view->voice_btn);
     lv_label_set_text(view->voice_label, "按住说话");
     lv_obj_set_style_text_color(view->voice_label, lv_color_hex(0xffffff), 0);
-    lv_obj_set_style_text_font(view->voice_label, ui_font_assets_body(), 0);
+    lv_obj_set_style_text_font(view->voice_label, ui_font_assets_text(), 0);
     lv_obj_center(view->voice_label);
 
     lv_obj_add_flag(view->voice_btn, LV_OBJ_FLAG_HIDDEN);
@@ -515,7 +538,7 @@ ai_chat_view_t *ai_chat_view_create(const ai_chat_view_config_t *config) {
                           : "");
     lv_obj_set_style_text_color(view->secondary_label, lv_color_hex(0x111111),
                                 0);
-    lv_obj_set_style_text_font(view->secondary_label, ui_font_assets_body(), 0);
+    lv_obj_set_style_text_font(view->secondary_label, ui_font_assets_text(), 0);
     lv_obj_center(view->secondary_label);
 
     if (view->config->secondary_action_cb == NULL ||

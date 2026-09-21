@@ -50,7 +50,8 @@ typedef struct
 	lv_obj_t *screen_main_Bluetooth_label;
 	lv_obj_t *screen_main_Brightness;
 	lv_obj_t *screen_main_loudness;
-	lv_obj_t *screen_main_slider_1;
+	lv_obj_t *screen_main_music_button;
+	lv_obj_t *screen_main_music_button_label;
 	lv_obj_t *screen_main_img_1;
 	lv_obj_t *screen_main_imgbtn_1;
 	lv_obj_t *screen_main_imgbtn_1_label;

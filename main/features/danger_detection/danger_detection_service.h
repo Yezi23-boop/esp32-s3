@@ -8,10 +8,10 @@
 
 /*
  * 危险声音检测服务：
- * - 封装交通声音运行时与后处理告警回调；
+ * - 封装 ESP-DL 音频运行时与后处理告警回调；
  * - 对 UI 暴露统一状态快照，而不是底层推理链路细节；
  * - 负责把 horn / siren 等稳定标签转换成应用级告警动作；
- * - 支持两种推理后端：Edge Impulse (traffic_inference) 和 ESP-DL 单模型 (espdl_inference)。
+ * - 当前固定使用 ESP-DL 单模型 (espdl_inference)。
  */
 
 #ifdef __cplusplus
@@ -48,13 +48,6 @@ extern "C"
         DANGER_DETECTION_LABEL_DANGER,// 通用危险标签（ESP-DL 二分类模式）
     } danger_detection_label_t;
 
-    /* 推理后端类型。 */
-    typedef enum
-    {
-        DANGER_DETECTION_BACKEND_EDGE_IMPULSE = 0, /**< Edge Impulse TFLite 3 分类。 */
-        DANGER_DETECTION_BACKEND_ESPDL = 1,        /**< ESP-DL 单模型危险二分类。 */
-    } danger_detection_backend_t;
-
     /* 用户级危险识别灵敏度模式。 */
     typedef enum
     {
@@ -76,7 +69,6 @@ extern "C"
         uint32_t alert_sequence;                      /**< 告警触发序号，单调递增。 */
         esp_err_t last_error;                         /**< 最近一次错误码。 */
         bool danger_overlay_active;                   /**< UI 危险覆盖层当前是否激活。 */
-        danger_detection_backend_t active_backend;    /**< 当前活跃的推理后端。 */
     } danger_detection_snapshot_t;
 
     /**
@@ -108,15 +100,6 @@ extern "C"
      * @return `ESP_OK` 表示已成功启动或之前已在运行；其他错误表示启动失败。
      */
     esp_err_t danger_detection_service_start(void);
-
-    /**
-     * @brief 使用指定后端启动危险检测运行时。
-     *
-     * @param[in] backend 推理后端类型。
-     * @return `ESP_OK` 表示已成功启动；其他错误表示启动失败。
-     */
-    esp_err_t danger_detection_service_start_with_backend(
-        danger_detection_backend_t backend);
 
     /**
      * @brief 停止危险检测运行时。

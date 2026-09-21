@@ -55,7 +55,7 @@ void lv_port_indev_init(void)
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, lv_port_indev_read);
 
-    ESP_LOGI(LV_PORT_TAG, "LVGL 9.3 输入设备初始化完成");
+    ESP_LOGI(LV_PORT_TAG, "LVGL 9.5 输入设备初始化完成");
 }
 
 /**

@@ -6,7 +6,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "gui_guider.h"
-#include "services/network_service.h"
+#include "services/network/network_service.h"
 #include "services/official_chat_service.h"
 
 static const char *TAG = "ai_ui";

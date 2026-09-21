@@ -23,7 +23,7 @@
 /** @brief 组件日志标签。 */
 static const char *TAG = "ble_presence";
 /** @brief 普通蓝牙可发现名称，保持和当前设备命名风格一致，方便手机侧识别。 */
-static const char *kBlePresenceDeviceName = "ESP32S3-Watch";
+static const char *kBlePresenceDeviceName = "ESP32S3-723C";
 /** @brief 等待 NimBLE host task 退出的最长时间，单位毫秒。 */
 static const uint32_t kBlePresenceStopTimeoutMs = 1000;
 /** @brief 等待 host task 自删除完成的让步时间，单位毫秒。 */
@@ -84,7 +84,7 @@ static esp_err_t ble_presence_ensure_primitives(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_presence_bootstrap_lock);
+    taskENTER_CRITICAL(&s_presence_bootstrap_lock);
     if (s_presence_mutex == NULL)
     {
         s_presence_mutex =
@@ -94,7 +94,7 @@ static esp_err_t ble_presence_ensure_primitives(void)
     {
         s_stop_done = xSemaphoreCreateBinaryStatic(&s_stop_done_buffer);
     }
-    portEXIT_CRITICAL(&s_presence_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_presence_bootstrap_lock);
 
     return (s_presence_mutex != NULL && s_stop_done != NULL) ? ESP_OK
                                                              : ESP_FAIL;
@@ -438,7 +438,8 @@ esp_err_t ble_presence_stop(void)
     if (xSemaphoreTake(s_stop_done,
                        pdMS_TO_TICKS(kBlePresenceStopTimeoutMs)) != pdTRUE)
     {
-        ESP_LOGW(TAG, "等待 BLE presence host task 退出超时");
+        ESP_LOGE(TAG, "等待 BLE presence host task 退出超时，保留 runtime 以便重试停止");
+        return ESP_ERR_TIMEOUT;
     }
     vTaskDelay(pdMS_TO_TICKS(kBlePresenceTaskExitGraceMs));
     nimble_port_deinit();

@@ -86,9 +86,9 @@ static void wifi_control_event_handler(void *arg, esp_event_base_t event_base,
  */
 static void wifi_control_runtime_set_state(wifi_control_state_t state)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.state = state;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -103,9 +103,9 @@ static bool wifi_control_runtime_is_initialized(void)
 {
     bool initialized = false;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     initialized = s_runtime.initialized;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     return initialized;
 }
@@ -121,13 +121,13 @@ static bool wifi_control_runtime_begin_init(void)
 {
     bool can_begin = false;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     if (!s_runtime.initialized && !s_runtime.init_in_progress)
     {
         s_runtime.init_in_progress = true;
         can_begin = true;
     }
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     return can_begin;
 }
@@ -138,9 +138,9 @@ static bool wifi_control_runtime_begin_init(void)
  */
 static void wifi_control_runtime_end_init(void)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.init_in_progress = false;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -154,9 +154,9 @@ static void wifi_control_runtime_end_init(void)
  */
 static void wifi_control_runtime_set_initialized(bool initialized)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.initialized = initialized;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -173,9 +173,9 @@ static void wifi_control_runtime_wait_for_init_completion(void)
     {
         bool init_in_progress = false;
 
-        portENTER_CRITICAL(&s_runtime_lock);
+        taskENTER_CRITICAL(&s_runtime_lock);
         init_in_progress = s_runtime.init_in_progress;
-        portEXIT_CRITICAL(&s_runtime_lock);
+        taskEXIT_CRITICAL(&s_runtime_lock);
 
         if (!init_in_progress)
         {
@@ -193,9 +193,9 @@ static void wifi_control_runtime_wait_for_init_completion(void)
  */
 static void wifi_control_runtime_set_connected(bool connected)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.connected = connected;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -205,9 +205,9 @@ static void wifi_control_runtime_set_connected(bool connected)
  */
 static void wifi_control_runtime_set_retry_count(uint8_t retry_count)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.retry_count = retry_count;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -217,9 +217,9 @@ static void wifi_control_runtime_set_retry_count(uint8_t retry_count)
  */
 static void wifi_control_runtime_set_auto_reconnect_enabled(bool enabled)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.auto_reconnect_enabled = enabled;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -234,10 +234,10 @@ static void wifi_control_runtime_set_auto_reconnect_enabled(bool enabled)
 static void wifi_control_runtime_set_reconnect_markers(
     bool suppressed, bool reconnect_after_disconnect)
 {
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.reconnect_suppressed = suppressed;
     s_runtime.reconnect_after_disconnect = reconnect_after_disconnect;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -257,9 +257,9 @@ static bool wifi_control_runtime_get_auto_reconnect_enabled(void)
 {
     bool enabled = false;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     enabled = s_runtime.auto_reconnect_enabled;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
     return enabled;
 }
 
@@ -271,9 +271,9 @@ static bool wifi_control_runtime_get_connected(void)
 {
     bool connected = false;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     connected = s_runtime.connected;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
     return connected;
 }
 
@@ -291,10 +291,10 @@ static bool wifi_control_runtime_needs_disconnect_before_connect(void)
     bool connected = false;
     wifi_control_state_t state = WIFI_CONTROL_STATE_IDLE;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     connected = s_runtime.connected;
     state = s_runtime.state;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     return connected || state == WIFI_CONTROL_STATE_CONNECTED ||
            state == WIFI_CONTROL_STATE_CONNECTING;
@@ -311,10 +311,10 @@ static bool wifi_control_runtime_should_suppress_disconnect(
     bool suppressed = false;
     bool reconnecting = false;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     suppressed = s_runtime.reconnect_suppressed;
     reconnecting = s_runtime.reconnect_after_disconnect;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     if (reconnect_after_disconnect != NULL)
     {
@@ -331,9 +331,9 @@ static wifi_control_state_t wifi_control_runtime_get_state(void)
 {
     wifi_control_state_t state = WIFI_CONTROL_STATE_IDLE;
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     state = s_runtime.state;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
     return state;
 }
 
@@ -563,10 +563,10 @@ static void wifi_control_event_handler(void *arg, esp_event_base_t event_base,
                 wifi_control_runtime_get_auto_reconnect_enabled();
             uint8_t retry_count = 0;
 
-            portENTER_CRITICAL(&s_runtime_lock);
+            taskENTER_CRITICAL(&s_runtime_lock);
             s_runtime.connected = false;
             retry_count = s_runtime.retry_count;
-            portEXIT_CRITICAL(&s_runtime_lock);
+            taskEXIT_CRITICAL(&s_runtime_lock);
 
             ESP_LOGW(TAG,
                      "STA 断开连接: reason=%u suppress=%d auto_reconnect=%d retry=%u",

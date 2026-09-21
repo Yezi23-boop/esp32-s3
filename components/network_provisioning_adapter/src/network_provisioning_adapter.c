@@ -111,12 +111,12 @@ static esp_err_t network_provisioning_adapter_ensure_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_runtime_bootstrap_lock);
+    taskENTER_CRITICAL(&s_runtime_bootstrap_lock);
     if (s_runtime_mutex == NULL)
     {
         s_runtime_mutex = xSemaphoreCreateMutexStatic(&s_runtime_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_runtime_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_runtime_bootstrap_lock);
 
     return s_runtime_mutex != NULL ? ESP_OK : ESP_FAIL;
 }
@@ -136,13 +136,13 @@ static esp_err_t network_provisioning_adapter_ensure_lifecycle_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_lifecycle_bootstrap_lock);
+    taskENTER_CRITICAL(&s_lifecycle_bootstrap_lock);
     if (s_lifecycle_mutex == NULL)
     {
         s_lifecycle_mutex =
             xSemaphoreCreateRecursiveMutexStatic(&s_lifecycle_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_lifecycle_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_lifecycle_bootstrap_lock);
 
     return s_lifecycle_mutex != NULL ? ESP_OK : ESP_FAIL;
 }

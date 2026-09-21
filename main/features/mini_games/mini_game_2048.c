@@ -63,6 +63,16 @@ static bool mini_game_2048_calculate_game_over(const mini_game_2048_t *game)
            !mini_game_2048_can_merge_neighbor(game);
 }
 
+static bool mini_game_2048_has_winning_tile(const mini_game_2048_t *game)
+{
+    for (uint8_t i = 0; i < MINI_GAME_2048_CELL_COUNT; ++i) {
+        if (game->cells[i] >= 2048U) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool mini_game_2048_add_random_tile(mini_game_2048_t *game)
 {
     uint8_t empty_count = 0;
@@ -212,8 +222,11 @@ mini_game_2048_move_result_t mini_game_2048_move(
     mini_game_2048_move_result_t result = {0};
     uint32_t gained_score = 0;
 
-    if (game == NULL || game->game_over) {
+    if (game == NULL || game->game_over ||
+        (game->won && !game->continue_after_win)) {
         result.game_over = game != NULL ? game->game_over : true;
+        result.waiting_for_continue =
+            game != NULL && game->won && !game->continue_after_win;
         return result;
     }
 
@@ -235,8 +248,14 @@ mini_game_2048_move_result_t mini_game_2048_move(
         (void)mini_game_2048_add_random_tile(game);
     }
 
+    if (!game->won && mini_game_2048_has_winning_tile(game)) {
+        game->won = true;
+        result.just_won = true;
+    }
+
     game->game_over = mini_game_2048_calculate_game_over(game);
     result.game_over = game->game_over;
+    result.waiting_for_continue = game->won && !game->continue_after_win;
     return result;
 }
 
@@ -261,6 +280,18 @@ bool mini_game_2048_is_game_over(const mini_game_2048_t *game)
     return game != NULL ? game->game_over : true;
 }
 
+bool mini_game_2048_is_waiting_for_continue(const mini_game_2048_t *game)
+{
+    return game != NULL && game->won && !game->continue_after_win;
+}
+
+void mini_game_2048_continue(mini_game_2048_t *game)
+{
+    if (game != NULL && game->won) {
+        game->continue_after_win = true;
+    }
+}
+
 void mini_game_2048_load_board(mini_game_2048_t *game,
                                const uint16_t cells[MINI_GAME_2048_CELL_COUNT],
                                uint32_t score, uint32_t seed)
@@ -273,5 +304,6 @@ void mini_game_2048_load_board(mini_game_2048_t *game,
     memcpy(game->cells, cells, sizeof(game->cells));
     game->score = score;
     game->rng_state = mini_game_2048_normalize_seed(seed);
+    game->won = mini_game_2048_has_winning_tile(game);
     game->game_over = mini_game_2048_calculate_game_over(game);
 }

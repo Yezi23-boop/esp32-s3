@@ -15,7 +15,7 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/esp_lcd_co5300: ^2.0.3
-  lvgl/lvgl: 9.3.0   # 升级到9.3.x以兼容新的GUI Guider导出层与运行时字体链
+  lvgl/lvgl: ~9.5.0  # 与 xiaozhi-fonts 2.0.0 使用同一官方 LVGL 9.5 组合
   espressif/esp_codec_dev: ^1.5.2
   espressif/esp_audio_codec: ~2.4.1
   espressif/esp_audio_effects: ~1.2.1
@@ -24,7 +24,8 @@ dependencies:
   espressif/button: =*
   espressif/network_provisioning: ^1.2.4
   espressif/esp-dl: "^3.1.0"
-  78/xiaozhi-fonts: ^1.6.0
+  78/xiaozhi-fonts: 2.0.0
   joltwallet/littlefs: ^1.21.1
   espressif/mqtt: "*"
   espressif/onewire_bus: ^1.1.1
+  espressif/esp_delta_ota: ^1.1.4

@@ -4,8 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_log.h"
 #include "gui_guider.h"
 #include "ui_chinese_fonts.h"
+#include "ui_font_assets.h"
 
 #define MEMORY_WATCH_VIEW_MAX_INBOX_ITEMS 20U
 #define MEMORY_WATCH_INBOX_CLICK_SLOP 12
@@ -64,6 +66,7 @@ struct memory_watch_view
     memory_watch_view_page_t page;
     bool pressing;
     bool press_inside;
+    bool font_assets_error;
 };
 
 static const lv_coord_t kScreenWidth = 410;
@@ -71,6 +74,41 @@ static const lv_coord_t kScreenHeight = 502;
 static const lv_coord_t kHeaderHeight = 96;
 static const lv_coord_t kVoiceButtonWidth = 244;
 static const lv_coord_t kVoiceButtonHeight = 58;
+static const char *TAG = "memory_watch_view";
+
+/**
+ * @brief 获取 Hermes 动态正文使用的 16px common 字体。
+ *
+ * 该字体由官方 xiaozhi-fonts common 字符集生成，位于 assets raw 分区，
+ * 由 ui_font_assets 统一 mmap。资源不可用时不返回替代字体，调用方进入
+ * 固定错误状态，避免动态正文出现方框。
+ */
+static const lv_font_t *memory_watch_view_text_font(void)
+{
+    return ui_font_assets_hermes();
+}
+
+static void memory_watch_view_show_font_error(memory_watch_view_t *view)
+{
+    lv_obj_t *overlay = lv_obj_create(view->screen);
+    lv_obj_set_size(overlay, kScreenWidth, kScreenHeight);
+    lv_obj_set_pos(overlay, 0, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0xfbfbfa),
+                              LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER,
+                            LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(overlay, 0,
+                                  LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(overlay);
+    lv_label_set_text(label, "FONT ASSET ERROR");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x9f2f2d),
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_center(label);
+}
 
 static void memory_watch_view_call(memory_watch_view_t *view,
                                    memory_watch_view_action_cb_t cb)
@@ -122,7 +160,7 @@ static void memory_watch_view_style_badge(lv_obj_t *obj, lv_color_t bg,
     lv_obj_set_style_pad_top(obj, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(obj, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
     memory_watch_view_set_text_style(
-        obj, text, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        obj, text, &lv_font_montserrat_lxgw_common_5500_16_4);
 }
 
 static bool memory_watch_view_point_inside(const lv_area_t *area,
@@ -402,7 +440,7 @@ static lv_obj_t *memory_watch_view_create_text_button(lv_obj_t *parent,
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
     memory_watch_view_set_text_style(
-        label, text_color, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        label, text_color, &lv_font_montserrat_lxgw_common_5500_16_4);
     lv_obj_set_style_text_color(label, lv_color_hex(0x8a8984),
                                 LV_PART_MAIN | LV_STATE_DISABLED);
     lv_obj_center(label);
@@ -452,7 +490,8 @@ static lv_coord_t memory_watch_view_message_height(const char *text,
 
 static void memory_watch_view_rebuild_conversation(memory_watch_view_t *view)
 {
-    if (view == NULL || view->conversation_list == NULL)
+    if (view == NULL || view->conversation_list == NULL ||
+        view->font_assets_error || !ui_font_assets_ready())
     {
         return;
     }
@@ -514,7 +553,7 @@ static void memory_watch_view_rebuild_conversation(memory_watch_view_t *view)
         lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
         memory_watch_view_set_text_style(
             label, lv_color_hex(0x2f3437),
-            &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+            memory_watch_view_text_font());
         lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
         y += card_h + 12;
     }
@@ -603,7 +642,7 @@ static void memory_watch_view_rebuild_inbox_list(memory_watch_view_t *view)
                           item->created_at != NULL ? item->created_at : "");
         memory_watch_view_set_text_style(
             time_label, lv_color_hex(0x787774),
-            &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+            &lv_font_montserrat_lxgw_common_5500_16_4);
         lv_obj_set_pos(time_label, 20, 6);
         lv_obj_set_size(time_label, 292, 18);
         lv_label_set_long_mode(time_label, LV_LABEL_LONG_DOT);
@@ -612,7 +651,7 @@ static void memory_watch_view_rebuild_inbox_list(memory_watch_view_t *view)
         lv_label_set_text(preview_label, item->text != NULL ? item->text : "");
         memory_watch_view_set_text_style(
             preview_label, lv_color_hex(0x2f3437),
-            &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+            &lv_font_montserrat_lxgw_common_5500_16_4);
         lv_obj_set_pos(preview_label, 20, 32);
         lv_obj_set_size(preview_label, 292, 24);
         lv_label_set_long_mode(preview_label, LV_LABEL_LONG_DOT);
@@ -708,7 +747,7 @@ static void memory_watch_view_create_header(memory_watch_view_t *view)
     lv_label_set_long_mode(view->title_label, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         view->title_label, lv_color_hex(0x111111),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_27_4);
+        &lv_font_montserrat_lxgw_tghz_static_27_4);
 
     view->status_badge = lv_label_create(view->screen);
     lv_obj_set_pos(view->status_badge, 108, 56);
@@ -730,7 +769,7 @@ static void memory_watch_view_create_header(memory_watch_view_t *view)
     lv_label_set_text(view->inbox_badge_label, "收件箱");
     memory_watch_view_set_text_style(
         view->inbox_badge_label, lv_color_hex(0x2f3437),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
     lv_obj_center(view->inbox_badge_label);
 
     view->connection_dot = lv_obj_create(view->screen);
@@ -781,7 +820,7 @@ static void memory_watch_view_create_voice_page(memory_watch_view_t *view)
     lv_label_set_long_mode(view->conversation_empty_label, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         view->conversation_empty_label, lv_color_hex(0x787774),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
     lv_obj_add_event_cb(view->conversation_empty_label,
                         memory_watch_view_gesture_event, LV_EVENT_ALL, view);
 
@@ -807,7 +846,7 @@ static void memory_watch_view_create_inbox_page(memory_watch_view_t *view)
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         subtitle, lv_color_hex(0x787774),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
 
     view->inbox_list = lv_obj_create(view->inbox_page);
     lv_obj_set_pos(view->inbox_list, 40, 42);
@@ -831,7 +870,7 @@ static void memory_watch_view_create_inbox_page(memory_watch_view_t *view)
     lv_label_set_long_mode(view->inbox_empty_label, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         view->inbox_empty_label, lv_color_hex(0x787774),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
 }
 
 static void memory_watch_view_create_detail_page(memory_watch_view_t *view)
@@ -846,7 +885,7 @@ static void memory_watch_view_create_detail_page(memory_watch_view_t *view)
     lv_label_set_long_mode(view->detail_time_label, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         view->detail_time_label, lv_color_hex(0x787774),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
 
     lv_obj_t *detail_card = lv_obj_create(view->detail_page);
     lv_obj_set_pos(detail_card, 40, 38);
@@ -864,7 +903,7 @@ static void memory_watch_view_create_detail_page(memory_watch_view_t *view)
     lv_label_set_long_mode(view->detail_text_label, LV_LABEL_LONG_WRAP);
     memory_watch_view_set_text_style(
         view->detail_text_label, lv_color_hex(0x2f3437),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
     lv_obj_align(view->detail_text_label, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *hint = lv_label_create(view->detail_page);
@@ -874,7 +913,7 @@ static void memory_watch_view_create_detail_page(memory_watch_view_t *view)
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
     memory_watch_view_set_text_style(
         hint, lv_color_hex(0x787774),
-        &lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+        &lv_font_montserrat_lxgw_common_5500_16_4);
     lv_obj_add_event_cb(hint, memory_watch_view_gesture_event, LV_EVENT_ALL,
                         view);
 }
@@ -882,6 +921,14 @@ static void memory_watch_view_create_detail_page(memory_watch_view_t *view)
 memory_watch_view_t *memory_watch_view_create(
     const memory_watch_view_config_t *config)
 {
+    esp_err_t font_assets_ret = ui_font_assets_init();
+    const bool font_assets_ready = ui_font_assets_ready();
+    if (font_assets_ret != ESP_OK || !font_assets_ready)
+    {
+        ESP_LOGW(TAG, "font assets unavailable: %s",
+                 esp_err_to_name(font_assets_ret));
+    }
+
     memory_watch_view_t *view =
         (memory_watch_view_t *)calloc(1, sizeof(memory_watch_view_t));
     if (view == NULL)
@@ -920,6 +967,13 @@ memory_watch_view_t *memory_watch_view_create(
     memory_watch_view_create_voice_page(view);
     memory_watch_view_create_inbox_page(view);
     memory_watch_view_create_detail_page(view);
+
+    if (font_assets_ret != ESP_OK || !font_assets_ready)
+    {
+        view->font_assets_error = true;
+        memory_watch_view_show_font_error(view);
+        return view;
+    }
 
     const memory_watch_view_model_t initial_model = {
         .top_status_text = "Hermes 待检测",
@@ -969,7 +1023,7 @@ lv_obj_t *memory_watch_view_get_screen(const memory_watch_view_t *view)
 void memory_watch_view_apply_model(memory_watch_view_t *view,
                                    const memory_watch_view_model_t *model)
 {
-    if (view == NULL || model == NULL)
+    if (view == NULL || model == NULL || view->font_assets_error)
     {
         return;
     }

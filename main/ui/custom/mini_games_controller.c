@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "features/mini_games/mini_game_2048.h"
+#include "features/mini_games/mini_games_progress.h"
 
 #define DISABLE_NEW_GAMES 0
 
@@ -16,18 +17,31 @@
 #endif
 
 #include "lvgl.h"
+#include "ui/ui_refresh_policy.h"
 #include "ui_chinese_fonts.h"
+#include "watch_notification_center.h"
 
 static const char *TAG = "mini_games";
 
 static const lv_coord_t kScreenWidth = 410;
 static const lv_coord_t kScreenHeight = 502;
-static const lv_coord_t kBoardX = 25;
-static const lv_coord_t kBoardY = 122;
-static const lv_coord_t kBoardSize = 360;
-static const lv_coord_t kTileSize = 82;
+static const lv_coord_t kBoardX = 40;
+static const lv_coord_t kBoardY = 96;
+static const lv_coord_t kBoardSize = 330;
+static const lv_coord_t kTileSize = 72;
 static const lv_coord_t kTileGap = 8;
 static const lv_coord_t kGestureThresholdPx = 28;
+/* 底部悬浮控制栏完全落在 CO5300 的安全显示区内。 */
+static const lv_coord_t kControlsY = 434;
+static const lv_coord_t kControlsHeight = 44;
+static const lv_coord_t kControlLeftX = 40;
+static const lv_coord_t kControlLeftWidth = 96;
+static const lv_coord_t kControlMiddleX = 144;
+static const lv_coord_t kControlMiddleWidth = 122;
+static const lv_coord_t kControlRightX = 274;
+static const lv_coord_t kControlRightWidth = 96;
+/* Flappy 管道从全屏舞台顶部开始，底部仍在悬浮控制栏上方结束。 */
+static const lv_coord_t kFlappyPlayfieldY = 0;
 
 typedef enum {
     MINI_GAME_TYPE_NONE = 0, /* 主菜单页面 */
@@ -50,23 +64,29 @@ static lv_obj_t *s_state_label;
 static lv_obj_t *s_state_icon;
 static lv_obj_t *s_pause_btn;
 static lv_obj_t *s_board;
+static lv_obj_t *s_2048_win_overlay;
+static lv_obj_t *s_game_controls[3];
+static lv_obj_t *s_game_score_panels[2];
 static lv_obj_t *s_tile_labels[MINI_GAME_2048_SIZE][MINI_GAME_2048_SIZE];
 static mini_game_2048_t s_game;
-static uint32_t s_best_score_2048 = 0;
 static bool s_game_initialized;
 static bool s_paused;
+static bool s_auto_paused;
 static bool s_pressing;
 static lv_point_t s_press_start;
 
 #if !DISABLE_NEW_GAMES
 /* ── Flappy Bird 全局静态变量 ── */
 static lv_obj_t *s_flappy_bird_obj;
+static lv_obj_t *s_flappy_stage;
 static lv_obj_t *s_flappy_pipes_top[FLAPPY_MAX_PIPES];
 static lv_obj_t *s_flappy_pipes_bottom[FLAPPY_MAX_PIPES];
 static lv_obj_t *s_flappy_score_label;
 static lv_obj_t *s_flappy_state_label;
 static lv_obj_t *s_flappy_pause_btn;
 static mini_game_flappy_t s_game_flappy;
+static uint32_t s_flappy_last_score;
+static bool s_flappy_game_over_recorded;
 static lv_obj_t *s_flappy_clouds[2];
 static float s_flappy_clouds_x[2];
 static float s_flappy_clouds_y[2];
@@ -78,6 +98,8 @@ static lv_obj_t *s_dino_score_label;
 static lv_obj_t *s_dino_state_label;
 static lv_obj_t *s_dino_pause_btn;
 static mini_game_dino_t s_game_dino;
+static uint32_t s_dino_last_milestone;
+static bool s_dino_game_over_recorded;
 static lv_obj_t *s_dino_sand_particles[4];
 static float s_dino_sand_x[4];
 static lv_obj_t *s_dino_cloud;
@@ -92,6 +114,8 @@ static void mini_games_controller_switch_to_game(mini_game_type_t game_type);
 static void mini_games_controller_timer_cb(lv_timer_t *timer);
 
 static void mini_games_controller_setup_2048(void);
+static void mini_games_controller_refresh_current_game(void);
+static void mini_games_controller_submit_current_score(void);
 
 #if !DISABLE_NEW_GAMES
 static void mini_games_controller_setup_flappy(void);
@@ -110,6 +134,7 @@ static void mini_games_controller_dino_pause_cb(lv_event_t *e);
 #endif
 
 static void mini_games_controller_game_back_cb(lv_event_t *e);
+static void mini_games_controller_2048_continue_cb(lv_event_t *e);
 
 /**
  * @brief 生成随机种子戳。由于未启动真机硬件随机，主要依赖时间微秒。
@@ -131,6 +156,101 @@ static bool mini_games_controller_is_foreground(void)
            lv_screen_active() == s_screen;
 }
 
+static void mini_games_controller_set_scale(void *object, int32_t scale)
+{
+    lv_obj_t *obj = (lv_obj_t *)object;
+    if (obj != NULL && lv_obj_is_valid(obj)) {
+        lv_obj_set_style_transform_scale(obj, scale,
+                                         LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+}
+
+/** @brief 用短促缩放表达合并、得分或里程碑，不创建常驻动画。 */
+static void mini_games_controller_pulse(lv_obj_t *obj)
+{
+    if (obj == NULL || !lv_obj_is_valid(obj)) {
+        return;
+    }
+
+    lv_anim_delete(obj, mini_games_controller_set_scale);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, mini_games_controller_set_scale);
+    lv_anim_set_values(&anim, 256, 276);
+    lv_anim_set_duration(&anim, 90);
+    lv_anim_set_playback_duration(&anim, 110);
+    lv_anim_start(&anim);
+}
+
+/**
+ * @brief 依据游戏运行状态调整底部控制栏可见度。
+ *
+ * 游戏运行时，完整控件半透明以让出舞台；暂停和结算时恢复实体外观，
+ * 保持触控入口清晰可见。
+ */
+static void mini_games_controller_set_controls_running(bool running)
+{
+    const lv_opa_t opacity = running ? LV_OPA_50 : LV_OPA_COVER;
+
+    for (uint8_t i = 0; i < 3; ++i) {
+        lv_obj_t *button = s_game_controls[i];
+        if (button == NULL || !lv_obj_is_valid(button)) {
+            continue;
+        }
+
+        lv_obj_set_style_opa(button, opacity, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+
+    for (uint8_t i = 0; i < 2; ++i) {
+        lv_obj_t *panel = s_game_score_panels[i];
+        if (panel == NULL || !lv_obj_is_valid(panel)) {
+            continue;
+        }
+
+        lv_obj_set_style_opa(panel, opacity, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+}
+
+static void mini_games_controller_submit_current_score(void)
+{
+    switch (s_current_game) {
+        case MINI_GAME_TYPE_2048:
+            mini_games_progress_submit_high_score(
+                MINI_GAMES_PROGRESS_2048,
+                mini_game_2048_get_score(&s_game));
+            break;
+#if !DISABLE_NEW_GAMES
+        case MINI_GAME_TYPE_FLAPPY:
+            mini_games_progress_submit_high_score(
+                MINI_GAMES_PROGRESS_FLAPPY,
+                mini_game_flappy_get_score(&s_game_flappy));
+            break;
+        case MINI_GAME_TYPE_DINO:
+            mini_games_progress_submit_high_score(
+                MINI_GAMES_PROGRESS_DINO,
+                mini_game_dino_get_score(&s_game_dino));
+            break;
+#endif
+        case MINI_GAME_TYPE_NONE:
+        default:
+            break;
+    }
+}
+
+static void mini_games_controller_refresh_current_game(void)
+{
+    if (s_current_game == MINI_GAME_TYPE_2048) {
+        mini_games_controller_refresh_board();
+#if !DISABLE_NEW_GAMES
+    } else if (s_current_game == MINI_GAME_TYPE_FLAPPY) {
+        mini_games_controller_refresh_flappy();
+    } else if (s_current_game == MINI_GAME_TYPE_DINO) {
+        mini_games_controller_refresh_dino();
+#endif
+    }
+}
+
 static void mini_games_controller_clear_game_refs(void)
 {
     s_score_label = NULL;
@@ -139,6 +259,13 @@ static void mini_games_controller_clear_game_refs(void)
     s_state_icon = NULL;
     s_pause_btn = NULL;
     s_board = NULL;
+    s_2048_win_overlay = NULL;
+    for (uint8_t i = 0; i < 3; ++i) {
+        s_game_controls[i] = NULL;
+    }
+    for (uint8_t i = 0; i < 2; ++i) {
+        s_game_score_panels[i] = NULL;
+    }
 
     for (uint8_t row = 0; row < MINI_GAME_2048_SIZE; ++row) {
         for (uint8_t col = 0; col < MINI_GAME_2048_SIZE; ++col) {
@@ -147,9 +274,11 @@ static void mini_games_controller_clear_game_refs(void)
     }
     s_pressing = false;
     s_game_initialized = false;
+    s_auto_paused = false;
 
 #if !DISABLE_NEW_GAMES
     s_flappy_bird_obj = NULL;
+    s_flappy_stage = NULL;
     for (uint8_t i = 0; i < FLAPPY_MAX_PIPES; ++i) {
         s_flappy_pipes_top[i] = NULL;
         s_flappy_pipes_bottom[i] = NULL;
@@ -157,6 +286,8 @@ static void mini_games_controller_clear_game_refs(void)
     s_flappy_score_label = NULL;
     s_flappy_state_label = NULL;
     s_flappy_pause_btn = NULL;
+    s_flappy_last_score = 0U;
+    s_flappy_game_over_recorded = false;
     s_flappy_clouds[0] = NULL;
     s_flappy_clouds[1] = NULL;
 
@@ -167,6 +298,8 @@ static void mini_games_controller_clear_game_refs(void)
     s_dino_score_label = NULL;
     s_dino_state_label = NULL;
     s_dino_pause_btn = NULL;
+    s_dino_last_milestone = 0U;
+    s_dino_game_over_recorded = false;
     for (uint8_t i = 0; i < 4; ++i) {
         s_dino_sand_particles[i] = NULL;
     }
@@ -222,7 +355,8 @@ static lv_color_t mini_games_controller_tile_text_color(uint16_t value)
 static void mini_games_controller_set_paused(bool paused)
 {
     s_paused = paused;
-    mini_games_controller_refresh_board();
+    s_auto_paused = false;
+    mini_games_controller_refresh_current_game();
 }
 
 static void mini_games_controller_new_game(void)
@@ -230,6 +364,7 @@ static void mini_games_controller_new_game(void)
     mini_game_2048_reset(&s_game, mini_games_controller_seed());
     s_game_initialized = true;
     s_paused = false;
+    s_auto_paused = false;
     mini_games_controller_refresh_board();
 }
 
@@ -252,6 +387,13 @@ static void mini_games_controller_new_event_cb(lv_event_t *e)
 {
     (void)e;
     mini_games_controller_new_game();
+}
+
+static void mini_games_controller_2048_continue_cb(lv_event_t *e)
+{
+    (void)e;
+    mini_game_2048_continue(&s_game);
+    mini_games_controller_refresh_board();
 }
 
 static void mini_games_controller_pause_event_cb(lv_event_t *e)
@@ -310,7 +452,8 @@ static void mini_games_controller_board_event_cb(lv_event_t *e)
     }
 
     s_pressing = false;
-    if (s_paused || mini_game_2048_is_game_over(&s_game)) {
+    if (s_paused || mini_game_2048_is_game_over(&s_game) ||
+        mini_game_2048_is_waiting_for_continue(&s_game)) {
         return;
     }
 
@@ -324,7 +467,10 @@ static void mini_games_controller_board_event_cb(lv_event_t *e)
 
     const mini_game_2048_move_result_t result =
         mini_game_2048_move(&s_game, direction);
-    if (result.moved || result.game_over) {
+    if (result.just_won || result.game_over) {
+        mini_games_controller_submit_current_score();
+    }
+    if (result.moved || result.game_over || result.just_won) {
         mini_games_controller_refresh_board();
     }
 }
@@ -374,7 +520,7 @@ static lv_obj_t *mini_games_controller_create_icon_button(
     lv_obj_t *text_lbl = lv_label_create(content);
     lv_label_set_text(text_lbl, text);
     lv_obj_set_style_text_color(text_lbl, text_color, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(text_lbl, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(text_lbl, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_align_to(text_lbl, icon_lbl, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
 
@@ -406,6 +552,63 @@ static void mini_games_controller_create_tiles(void)
     }
 }
 
+static void mini_games_controller_create_2048_win_overlay(void)
+{
+    s_2048_win_overlay = lv_obj_create(s_game_cont);
+    lv_obj_set_pos(s_2048_win_overlay, kBoardX, kBoardY);
+    lv_obj_set_size(s_2048_win_overlay, kBoardSize, kBoardSize);
+    lv_obj_set_style_bg_color(s_2048_win_overlay, lv_color_hex(0xf8fafc),
+                              LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_2048_win_overlay, LV_OPA_90,
+                            LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(s_2048_win_overlay, 0,
+                                  LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_2048_win_overlay, 16,
+                            LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(s_2048_win_overlay, 0,
+                             LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_remove_flag(s_2048_win_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(s_2048_win_overlay);
+    lv_label_set_text(title, "你赢了！");
+    lv_obj_set_size(title, kBoardSize, 34);
+    lv_obj_set_pos(title, 0, 76);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x3482e2),
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(
+        title, &lv_font_montserrat_lxgw_common_5500_22_4,
+        LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t *message = lv_label_create(s_2048_win_overlay);
+    lv_label_set_text(message, "已经合成 2048");
+    lv_obj_set_size(message, kBoardSize, 28);
+    lv_obj_set_pos(message, 0, 122);
+    lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(message, lv_color_hex(0x475569),
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(
+        message, &lv_font_montserrat_lxgw_common_5500_16_4,
+        LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t *continue_btn = mini_games_controller_create_icon_button(
+        s_2048_win_overlay, LV_SYMBOL_PLAY, lv_color_hex(0xffffff),
+        "继续挑战", lv_color_hex(0xffffff), 15, 176, 145, 46,
+        lv_color_hex(0x3482e2), false);
+    lv_obj_add_event_cb(continue_btn, mini_games_controller_2048_continue_cb,
+                        LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *new_btn = mini_games_controller_create_icon_button(
+        s_2048_win_overlay, "+", lv_color_hex(0x5ebb70), "新游戏",
+        lv_color_hex(0x374151), 170, 176, 145, 46,
+        lv_color_hex(0xffffff), true);
+    lv_obj_add_event_cb(new_btn, mini_games_controller_new_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(s_2048_win_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
 /* ── 统一选择菜单界面搭建 ── */
 static void mini_games_controller_menu_btn_cb(lv_event_t *e)
 {
@@ -423,7 +626,7 @@ static void mini_games_controller_setup_menu(void)
     lv_obj_t *title = lv_label_create(s_menu_cont);
     lv_label_set_text(title, "精选小游戏");
     lv_obj_set_style_text_color(title, lv_color_hex(0x1f2937), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_lxgw_tghz_level1_3500_22_4,
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_lxgw_common_5500_22_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_pos(title, 40, 40);
 
@@ -431,7 +634,7 @@ static void mini_games_controller_setup_menu(void)
     lv_obj_t *sub = lv_label_create(s_menu_cont);
     lv_label_set_text(sub, "请选择一款小游戏开始游玩:");
     lv_obj_set_style_text_color(sub, lv_color_hex(0x6b7280), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(sub, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(sub, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_pos(sub, 40, 84);
 
@@ -494,6 +697,7 @@ static void mini_games_controller_switch_to_game(mini_game_type_t game_type)
 
     s_current_game = game_type;
     s_paused = false;
+    s_auto_paused = false;
 
     if (game_type == MINI_GAME_TYPE_NONE) {
         /* 返回主菜单状态 */
@@ -512,12 +716,16 @@ static void mini_games_controller_switch_to_game(mini_game_type_t game_type)
 #if !DISABLE_NEW_GAMES
         } else if (game_type == MINI_GAME_TYPE_FLAPPY) {
             mini_game_flappy_init(&s_game_flappy, mini_games_controller_seed());
+            s_flappy_last_score = 0U;
+            s_flappy_game_over_recorded = false;
             mini_games_controller_setup_flappy();
             mini_games_controller_refresh_flappy();
             /* 启动 40ms 高刷运行 Timer 循环 */
             s_game_timer = lv_timer_create(mini_games_controller_timer_cb, 40, NULL);
         } else if (game_type == MINI_GAME_TYPE_DINO) {
             mini_game_dino_init(&s_game_dino, mini_games_controller_seed());
+            s_dino_last_milestone = 0U;
+            s_dino_game_over_recorded = false;
             mini_games_controller_setup_dino();
             mini_games_controller_refresh_dino();
             /* 启动 40ms 高刷运行 Timer 循环 */
@@ -537,12 +745,14 @@ static void mini_games_controller_timer_cb(lv_timer_t *timer)
 
 #if !DISABLE_NEW_GAMES
     if (s_current_game == MINI_GAME_TYPE_FLAPPY) {
-        if (!s_game_flappy.game_over) {
+        if (mini_game_flappy_is_started(&s_game_flappy) &&
+            !s_game_flappy.game_over) {
             mini_game_flappy_step(&s_game_flappy);
             mini_games_controller_refresh_flappy();
         }
     } else if (s_current_game == MINI_GAME_TYPE_DINO) {
-        if (!s_game_dino.game_over) {
+        if (mini_game_dino_is_started(&s_game_dino) &&
+            !s_game_dino.game_over) {
             mini_game_dino_step(&s_game_dino);
             mini_games_controller_refresh_dino();
         }
@@ -560,27 +770,10 @@ static void mini_games_controller_game_back_cb(lv_event_t *e)
 /* ── 2048 游戏 UI 动态重构挂载 ── */
 static void mini_games_controller_setup_2048(void)
 {
-    /* ── 标题 "20" & "48"：左上角 ── */
-    lv_obj_t *title_20 = lv_label_create(s_game_cont);
-    lv_label_set_text(title_20, "20");
-    lv_obj_set_style_text_color(title_20, lv_color_hex(0x3482e2),
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(title_20, &lv_font_montserratMedium_46,
-                               LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_pos(title_20, 40, 20);
-
-    lv_obj_t *title_48 = lv_label_create(s_game_cont);
-    lv_label_set_text(title_48, "48");
-    lv_obj_set_style_text_color(title_48, lv_color_hex(0x5ebb70),
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(title_48, &lv_font_montserratMedium_46,
-                               LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_align_to(title_48, title_20, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
-
-    /* ── 分数卡片：Score & Best 并排，白色底板 ── */
+    /* 顶部只保留悬浮分数，棋盘和操作栏占据主舞台。 */
     lv_obj_t *score_card = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(score_card, 195, 20);
-    lv_obj_set_size(score_card, 92, 62);
+    lv_obj_set_pos(score_card, 214, 24);
+    lv_obj_set_size(score_card, 74, 54);
     lv_obj_set_style_bg_color(score_card, lv_color_hex(0xffffff),
                               LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(score_card, LV_OPA_COVER,
@@ -593,12 +786,13 @@ static void mini_games_controller_setup_2048(void)
     lv_obj_set_style_shadow_width(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(score_card, LV_OBJ_FLAG_SCROLLABLE);
+    s_game_score_panels[0] = score_card;
 
     lv_obj_t *score_hdr = lv_label_create(score_card);
     lv_label_set_text(score_hdr, "得分");
     lv_obj_set_style_text_color(score_hdr, lv_color_hex(0x9ca3af),
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(score_hdr, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(score_hdr, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_align(score_hdr, LV_ALIGN_TOP_MID, 0, 6);
 
@@ -611,8 +805,8 @@ static void mini_games_controller_setup_2048(void)
     lv_obj_align(s_score_label, LV_ALIGN_BOTTOM_MID, 0, -6);
 
     lv_obj_t *best_card = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(best_card, 278, 20);
-    lv_obj_set_size(best_card, 92, 62);
+    lv_obj_set_pos(best_card, 296, 24);
+    lv_obj_set_size(best_card, 74, 54);
     lv_obj_set_style_bg_color(best_card, lv_color_hex(0xffffff),
                               LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(best_card, LV_OPA_COVER,
@@ -625,12 +819,13 @@ static void mini_games_controller_setup_2048(void)
     lv_obj_set_style_shadow_width(best_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(best_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(best_card, LV_OBJ_FLAG_SCROLLABLE);
+    s_game_score_panels[1] = best_card;
 
     lv_obj_t *best_hdr = lv_label_create(best_card);
     lv_label_set_text(best_hdr, "最高");
     lv_obj_set_style_text_color(best_hdr, lv_color_hex(0x9ca3af),
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(best_hdr, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(best_hdr, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_align(best_hdr, LV_ALIGN_TOP_MID, 0, 6);
 
@@ -642,10 +837,10 @@ static void mini_games_controller_setup_2048(void)
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_align(s_best_score_label, LV_ALIGN_BOTTOM_MID, 0, -6);
 
-    /* ── 游戏状态提示（滑动指示器，带有绿色的左右箭头小图标和中文提示） ── */
+    /* 非正常状态才显示提示，避免初始画面与棋盘竞争空间。 */
     s_state_icon = lv_obj_create(s_game_cont);
     lv_obj_set_size(s_state_icon, 30, 18);
-    lv_obj_set_pos(s_state_icon, 40, 70);
+    lv_obj_set_pos(s_state_icon, 40, 78);
     lv_obj_set_style_radius(s_state_icon, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_color(s_state_icon, lv_color_hex(0xdcfce7),
                               LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -664,34 +859,40 @@ static void mini_games_controller_setup_2048(void)
     lv_obj_center(icon_arrow);
 
     s_state_label = lv_label_create(s_game_cont);
-    lv_obj_set_size(s_state_label, 210, 18);
-    lv_obj_set_pos(s_state_label, 60, 70);
+    lv_obj_set_size(s_state_label, 230, 18);
+    lv_obj_set_pos(s_state_label, 40, 78);
     lv_label_set_long_mode(s_state_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_state_label, lv_color_hex(0x6b7280),
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_state_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(s_state_label, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    /* ── 按钮行：返回 / 新游戏 / 暂停，y=88 ── */
+    /* ── 底部安全区悬浮控制栏：返回 / 新游戏 / 暂停 ── */
     lv_obj_t *back_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_LEFT, lv_color_hex(0x10b981), "返回", lv_color_hex(0x374151),
-        40, 88, 100, 34, lv_color_hex(0xffffff), true);
+        kControlLeftX, kControlsY, kControlLeftWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[0] = back_btn;
     lv_obj_add_event_cb(back_btn, mini_games_controller_game_back_cb,
                         LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *new_btn = mini_games_controller_create_icon_button(
         s_game_cont, "+", lv_color_hex(0xffffff), "新游戏", lv_color_hex(0xffffff),
-        148, 88, 114, 34, lv_color_hex(0x5ebb70), false);
+        kControlMiddleX, kControlsY, kControlMiddleWidth, kControlsHeight,
+        lv_color_hex(0x5ebb70), false);
+    s_game_controls[1] = new_btn;
     lv_obj_add_event_cb(new_btn, mini_games_controller_new_event_cb,
                         LV_EVENT_CLICKED, NULL);
 
     s_pause_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_PAUSE, lv_color_hex(0x3b82f6), "暂停", lv_color_hex(0x374151),
-        256, 88, 114, 34, lv_color_hex(0xffffff), true);
+        kControlRightX, kControlsY, kControlRightWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[2] = s_pause_btn;
     lv_obj_add_event_cb(s_pause_btn, mini_games_controller_pause_event_cb,
                         LV_EVENT_CLICKED, NULL);
 
-    /* ── 游戏棋盘：y=134，底部 494px，白色底板 ── */
+    /* ── 2048 主舞台：顶部得分与底部操作栏之间保留 8px 间隔 ── */
     s_board = lv_obj_create(s_game_cont);
     lv_obj_set_size(s_board, kBoardSize, kBoardSize);
     lv_obj_set_pos(s_board, kBoardX, kBoardY);
@@ -712,6 +913,7 @@ static void mini_games_controller_setup_2048(void)
                         LV_EVENT_ALL, NULL);
 
     mini_games_controller_create_tiles();
+    mini_games_controller_create_2048_win_overlay();
 }
 
 static void mini_games_controller_refresh_board(void)
@@ -725,33 +927,54 @@ static void mini_games_controller_refresh_board(void)
                                (unsigned long)mini_game_2048_get_score(&s_game));
     }
 
-    uint32_t curr_score = mini_game_2048_get_score(&s_game);
-    if (curr_score > s_best_score_2048) {
-        s_best_score_2048 = curr_score;
-    }
+    const uint32_t curr_score = mini_game_2048_get_score(&s_game);
+    const uint32_t stored_best = mini_games_progress_get_high_score(
+        MINI_GAMES_PROGRESS_2048);
+    const uint32_t visible_best =
+        curr_score > stored_best ? curr_score : stored_best;
 
     if (s_best_score_label != NULL && lv_obj_is_valid(s_best_score_label)) {
-        lv_label_set_text_fmt(s_best_score_label, "%lu", (unsigned long)s_best_score_2048);
+        lv_label_set_text_fmt(s_best_score_label, "%lu",
+                              (unsigned long)visible_best);
+    }
+
+    if (s_2048_win_overlay != NULL &&
+        lv_obj_is_valid(s_2048_win_overlay)) {
+        if (mini_game_2048_is_waiting_for_continue(&s_game)) {
+            lv_obj_remove_flag(s_2048_win_overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_2048_win_overlay);
+        } else {
+            lv_obj_add_flag(s_2048_win_overlay, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     if (s_state_label != NULL && lv_obj_is_valid(s_state_label)) {
         if (mini_game_2048_is_game_over(&s_game)) {
             lv_label_set_text(s_state_label, "游戏结束");
-            lv_obj_set_pos(s_state_label, 40, 70);
+            lv_obj_set_pos(s_state_label, 40, 78);
             if (s_state_icon && lv_obj_is_valid(s_state_icon)) {
                 lv_obj_add_flag(s_state_icon, LV_OBJ_FLAG_HIDDEN);
             }
+            lv_obj_remove_flag(s_state_label, LV_OBJ_FLAG_HIDDEN);
+        } else if (mini_game_2048_is_waiting_for_continue(&s_game)) {
+            lv_label_set_text(s_state_label, "已合成 2048");
+            lv_obj_set_pos(s_state_label, 40, 78);
+            if (s_state_icon && lv_obj_is_valid(s_state_icon)) {
+                lv_obj_add_flag(s_state_icon, LV_OBJ_FLAG_HIDDEN);
+            }
+            lv_obj_remove_flag(s_state_label, LV_OBJ_FLAG_HIDDEN);
         } else if (s_paused) {
-            lv_label_set_text(s_state_label, "已暂停");
-            lv_obj_set_pos(s_state_label, 40, 70);
+            lv_label_set_text(s_state_label,
+                              s_auto_paused ? "已自动暂停" : "已暂停");
+            lv_obj_set_pos(s_state_label, 40, 78);
             if (s_state_icon && lv_obj_is_valid(s_state_icon)) {
                 lv_obj_add_flag(s_state_icon, LV_OBJ_FLAG_HIDDEN);
             }
+            lv_obj_remove_flag(s_state_label, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_label_set_text(s_state_label, "滑动以移动");
-            lv_obj_set_pos(s_state_label, 60, 70);
+            lv_obj_add_flag(s_state_label, LV_OBJ_FLAG_HIDDEN);
             if (s_state_icon && lv_obj_is_valid(s_state_icon)) {
-                lv_obj_remove_flag(s_state_icon, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(s_state_icon, LV_OBJ_FLAG_HIDDEN);
             }
         }
     }
@@ -777,6 +1000,10 @@ static void mini_games_controller_refresh_board(void)
             }
         }
     }
+
+    mini_games_controller_set_controls_running(
+        !s_paused && !mini_game_2048_is_game_over(&s_game) &&
+        !mini_game_2048_is_waiting_for_continue(&s_game));
 
     for (uint8_t row = 0; row < MINI_GAME_2048_SIZE; ++row) {
         for (uint8_t col = 0; col < MINI_GAME_2048_SIZE; ++col) {
@@ -808,18 +1035,22 @@ static void mini_games_controller_refresh_board(void)
 /* ── Flappy Bird 游戏 UI 动态重构挂载 ── */
 static void mini_games_controller_setup_flappy(void)
 {
-    /* 1. 顶部标题 */
-    lv_obj_t *title_lbl = lv_label_create(s_game_cont);
-    lv_label_set_text(title_lbl, "飞翔的小鸟");
-    lv_obj_set_style_text_color(title_lbl, lv_color_hex(0x0ea5e9), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_lxgw_tghz_level1_3500_22_4,
-                               LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_pos(title_lbl, 40, 20);
+    /* 全屏天空舞台先创建，后续得分和操作控件作为安全区悬浮层。 */
+    lv_obj_t *stage = lv_obj_create(s_game_cont);
+    lv_obj_set_pos(stage, 0, 0);
+    lv_obj_set_size(stage, kScreenWidth, kScreenHeight);
+    lv_obj_set_style_bg_color(stage, lv_color_hex(0xbae6fd), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_remove_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(stage, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(stage, mini_games_controller_flappy_click_cb, LV_EVENT_PRESSED, NULL);
 
-    /* 2. 右侧分数卡片 */
     lv_obj_t *score_card = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(score_card, 222, 20);
-    lv_obj_set_size(score_card, 148, 44);
+    lv_obj_set_pos(score_card, 218, 24);
+    lv_obj_set_size(score_card, 152, 48);
     lv_obj_set_style_bg_color(score_card, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(score_card, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_radius(score_card, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -828,30 +1059,29 @@ static void mini_games_controller_setup_flappy(void)
     lv_obj_set_style_shadow_width(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(score_card, LV_OBJ_FLAG_SCROLLABLE);
+    s_game_score_panels[0] = score_card;
 
     s_flappy_score_label = lv_label_create(score_card);
     lv_label_set_text(s_flappy_score_label, "分数: 0");
     lv_obj_set_style_text_color(s_flappy_score_label, lv_color_hex(0x1f2937), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_flappy_score_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(s_flappy_score_label, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_center(s_flappy_score_label);
 
-    /* 3. 游戏舞台 (天空背景画布) */
-    lv_obj_t *stage = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(stage, 40, 68);
-    lv_obj_set_size(stage, FLAPPY_PLAY_AREA_W, FLAPPY_PLAY_AREA_H);
-    lv_obj_set_style_bg_color(stage, lv_color_hex(0xbae6fd), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(stage, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(stage, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(stage, lv_color_hex(0xe5e7eb), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_all(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_remove_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(stage, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(stage, mini_games_controller_flappy_click_cb, LV_EVENT_PRESSED, NULL);
+    /* 全屏背景内的局部物理区，子对象默认裁剪在安全窗口中。 */
+    lv_obj_t *playfield = lv_obj_create(stage);
+    lv_obj_set_pos(playfield, 0, kFlappyPlayfieldY);
+    lv_obj_set_size(playfield, FLAPPY_PLAY_AREA_W, FLAPPY_PLAY_AREA_H);
+    lv_obj_set_style_bg_opa(playfield, LV_OPA_TRANSP,
+                            LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(playfield, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(playfield, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_remove_flag(playfield, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(playfield, LV_OBJ_FLAG_CLICKABLE);
+    s_flappy_stage = stage;
 
     /* 3.1 创建背景白云 (先创建的渲染在底层) */
-    s_flappy_clouds[0] = lv_image_create(stage);
+    s_flappy_clouds[0] = lv_image_create(playfield);
     lv_image_set_src(s_flappy_clouds[0], &img_cloud);
     s_flappy_clouds_x[0] = 50.0f;
     s_flappy_clouds_y[0] = 30.0f;
@@ -859,7 +1089,7 @@ static void mini_games_controller_setup_flappy(void)
     lv_obj_set_style_image_opa(s_flappy_clouds[0], LV_OPA_70, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(s_flappy_clouds[0], LV_OBJ_FLAG_CLICKABLE);
 
-    s_flappy_clouds[1] = lv_image_create(stage);
+    s_flappy_clouds[1] = lv_image_create(playfield);
     lv_image_set_src(s_flappy_clouds[1], &img_cloud);
     s_flappy_clouds_x[1] = 220.0f;
     s_flappy_clouds_y[1] = 75.0f;
@@ -867,16 +1097,19 @@ static void mini_games_controller_setup_flappy(void)
     lv_obj_set_style_image_opa(s_flappy_clouds[1], LV_OPA_50, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(s_flappy_clouds[1], LV_OBJ_FLAG_CLICKABLE);
 
-    s_flappy_state_label = lv_label_create(stage);
+    s_flappy_state_label = lv_label_create(playfield);
     lv_label_set_text(s_flappy_state_label, "轻触屏幕开始飞翔");
+    lv_obj_set_size(s_flappy_state_label, FLAPPY_PLAY_AREA_W - 24, 56);
     lv_obj_set_style_text_color(s_flappy_state_label, lv_color_hex(0x0369a1), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_flappy_state_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(s_flappy_state_label, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(s_flappy_state_label, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_center(s_flappy_state_label);
 
     /* 4. 创建障碍物管道 */
     for (uint8_t i = 0; i < FLAPPY_MAX_PIPES; ++i) {
-        s_flappy_pipes_top[i] = lv_obj_create(stage);
+        s_flappy_pipes_top[i] = lv_obj_create(playfield);
         lv_obj_set_style_bg_color(s_flappy_pipes_top[i], lv_color_hex(0x22c55e), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_opa(s_flappy_pipes_top[i], LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_radius(s_flappy_pipes_top[i], 4, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -885,7 +1118,7 @@ static void mini_games_controller_setup_flappy(void)
         lv_obj_remove_flag(s_flappy_pipes_top[i], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_remove_flag(s_flappy_pipes_top[i], LV_OBJ_FLAG_SCROLLABLE);
 
-        s_flappy_pipes_bottom[i] = lv_obj_create(stage);
+        s_flappy_pipes_bottom[i] = lv_obj_create(playfield);
         lv_obj_set_style_bg_color(s_flappy_pipes_bottom[i], lv_color_hex(0x22c55e), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_opa(s_flappy_pipes_bottom[i], LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_radius(s_flappy_pipes_bottom[i], 4, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -896,7 +1129,7 @@ static void mini_games_controller_setup_flappy(void)
     }
 
     /* 5. 创建小鸟图像对象 (使用像素黄鸟贴图) */
-    s_flappy_bird_obj = lv_image_create(stage);
+    s_flappy_bird_obj = lv_image_create(playfield);
     lv_image_set_src(s_flappy_bird_obj, &img_bird_mid);
     lv_obj_set_size(s_flappy_bird_obj, 34, 24);
     lv_obj_remove_flag(s_flappy_bird_obj, LV_OBJ_FLAG_CLICKABLE);
@@ -905,17 +1138,23 @@ static void mini_games_controller_setup_flappy(void)
     /* 6. 底部控制栏 */
     lv_obj_t *back_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_LEFT, lv_color_hex(0xef4444), "退出", lv_color_hex(0x374151),
-        40, 412, 100, 34, lv_color_hex(0xffffff), true);
+        kControlLeftX, kControlsY, kControlLeftWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[0] = back_btn;
     lv_obj_add_event_cb(back_btn, mini_games_controller_game_back_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *restart_btn = mini_games_controller_create_icon_button(
         s_game_cont, "+", lv_color_hex(0xffffff), "重开", lv_color_hex(0xffffff),
-        148, 412, 114, 34, lv_color_hex(0x0ea5e9), false);
+        kControlMiddleX, kControlsY, kControlMiddleWidth, kControlsHeight,
+        lv_color_hex(0x0ea5e9), false);
+    s_game_controls[1] = restart_btn;
     lv_obj_add_event_cb(restart_btn, mini_games_controller_flappy_restart_cb, LV_EVENT_CLICKED, NULL);
 
     s_flappy_pause_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_PAUSE, lv_color_hex(0x0ea5e9), "暂停", lv_color_hex(0x374151),
-        256, 412, 114, 34, lv_color_hex(0xffffff), true);
+        kControlRightX, kControlsY, kControlRightWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[2] = s_flappy_pause_btn;
     lv_obj_add_event_cb(s_flappy_pause_btn, mini_games_controller_flappy_pause_cb, LV_EVENT_CLICKED, NULL);
 }
 
@@ -943,9 +1182,9 @@ static void mini_games_controller_refresh_flappy(void)
         cloud_opa_1 = LV_OPA_30;
     }
 
-    lv_obj_t *stage = lv_obj_get_parent(s_flappy_bird_obj);
-    if (stage && lv_obj_is_valid(stage)) {
-        lv_obj_set_style_bg_color(stage, bg_color, LV_PART_MAIN | LV_STATE_DEFAULT);
+    if (s_flappy_stage && lv_obj_is_valid(s_flappy_stage)) {
+        lv_obj_set_style_bg_color(s_flappy_stage, bg_color,
+                                  LV_PART_MAIN | LV_STATE_DEFAULT);
     }
     if (s_flappy_state_label && lv_obj_is_valid(s_flappy_state_label)) {
         lv_obj_set_style_text_color(s_flappy_state_label, text_color, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -958,7 +1197,8 @@ static void mini_games_controller_refresh_flappy(void)
     }
 
     /* 1. 云朵滑动 2.5D 视差计算 */
-    if (!s_paused && !s_game_flappy.game_over && s_game_flappy.frame_count > 0) {
+    if (!s_paused && mini_game_flappy_is_started(&s_game_flappy) &&
+        !s_game_flappy.game_over && s_game_flappy.frame_count > 0) {
         // 第一朵云速度 0.3px/帧
         s_flappy_clouds_x[0] -= 0.3f;
         if (s_flappy_clouds_x[0] + 32.0f < 0.0f) {
@@ -1024,31 +1264,48 @@ static void mini_games_controller_refresh_flappy(void)
     }
 
     if (s_flappy_score_label != NULL && lv_obj_is_valid(s_flappy_score_label)) {
-        lv_label_set_text_fmt(s_flappy_score_label, "分数: %lu", (unsigned long)s_game_flappy.score);
+        const uint32_t stored_best = mini_games_progress_get_high_score(
+            MINI_GAMES_PROGRESS_FLAPPY);
+        const uint32_t visible_best = s_game_flappy.score > stored_best
+                                          ? s_game_flappy.score
+                                          : stored_best;
+        lv_label_set_text_fmt(s_flappy_score_label, "分数 %lu 最高 %lu",
+                              (unsigned long)s_game_flappy.score,
+                              (unsigned long)visible_best);
+        if (s_game_flappy.score > s_flappy_last_score) {
+            s_flappy_last_score = s_game_flappy.score;
+            mini_games_controller_pulse(s_flappy_score_label);
+        }
     }
 
     if (s_flappy_state_label != NULL && lv_obj_is_valid(s_flappy_state_label)) {
         if (s_game_flappy.game_over) {
             const char *medal = "";
-            if (s_game_flappy.score >= 30) {
-                medal = " [🥇金牌]";
-            } else if (s_game_flappy.score >= 15) {
-                medal = " [🥈银牌]";
-            } else if (s_game_flappy.score >= 5) {
-                medal = " [🥉铜牌]";
+            if (s_game_flappy.score >= 40) {
+                medal = " 白金";
+            } else if (s_game_flappy.score >= 30) {
+                medal = " 金牌";
+            } else if (s_game_flappy.score >= 20) {
+                medal = " 银牌";
+            } else if (s_game_flappy.score >= 10) {
+                medal = " 铜牌";
             }
-            lv_label_set_text_fmt(s_flappy_state_label, "游戏结束!%s 点击重开", medal);
+            lv_label_set_text_fmt(s_flappy_state_label, "游戏结束！%s\n点击重开", medal);
             lv_obj_remove_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
+            if (!s_flappy_game_over_recorded) {
+                s_flappy_game_over_recorded = true;
+                mini_games_controller_submit_current_score();
+                mini_games_controller_pulse(s_flappy_state_label);
+            }
         } else if (s_paused) {
-            lv_label_set_text(s_flappy_state_label, "已暂停");
+            lv_label_set_text(s_flappy_state_label,
+                              s_auto_paused ? "已自动暂停" : "已暂停");
+            lv_obj_remove_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
+        } else if (!mini_game_flappy_is_started(&s_game_flappy)) {
+            lv_label_set_text(s_flappy_state_label, "轻触屏幕开始飞翔");
             lv_obj_remove_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
         } else {
-            if (s_game_flappy.frame_count > 60) {
-                lv_obj_add_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_label_set_text(s_flappy_state_label, "轻触屏幕开始飞翔");
-                lv_obj_remove_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
-            }
+            lv_obj_add_flag(s_flappy_state_label, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -1073,13 +1330,19 @@ static void mini_games_controller_refresh_flappy(void)
             }
         }
     }
+
+    mini_games_controller_set_controls_running(
+        mini_game_flappy_is_started(&s_game_flappy) && !s_paused &&
+        !s_game_flappy.game_over);
 }
 
 static void mini_games_controller_flappy_click_cb(lv_event_t *e)
 {
     (void)e;
-    if (s_current_game == MINI_GAME_TYPE_FLAPPY) {
+    if (s_current_game == MINI_GAME_TYPE_FLAPPY && !s_paused &&
+        !mini_game_flappy_is_game_over(&s_game_flappy)) {
         mini_game_flappy_jump(&s_game_flappy);
+        mini_games_controller_refresh_flappy();
     }
 }
 
@@ -1089,6 +1352,9 @@ static void mini_games_controller_flappy_restart_cb(lv_event_t *e)
     if (s_current_game == MINI_GAME_TYPE_FLAPPY) {
         mini_game_flappy_reset(&s_game_flappy, mini_games_controller_seed());
         s_paused = false;
+        s_auto_paused = false;
+        s_flappy_last_score = 0U;
+        s_flappy_game_over_recorded = false;
         mini_games_controller_refresh_flappy();
     }
 }
@@ -1096,25 +1362,37 @@ static void mini_games_controller_flappy_restart_cb(lv_event_t *e)
 static void mini_games_controller_flappy_pause_cb(lv_event_t *e)
 {
     (void)e;
-    s_paused = !s_paused;
-    mini_games_controller_refresh_flappy();
+    if (mini_game_flappy_is_started(&s_game_flappy) &&
+        !mini_game_flappy_is_game_over(&s_game_flappy)) {
+        mini_games_controller_set_paused(!s_paused);
+    }
 }
 
 /* ── 小恐龙跑酷 UI 动态重构挂载 ── */
 static void mini_games_controller_setup_dino(void)
 {
-    /* 1. 顶部标题 */
-    lv_obj_t *title_lbl = lv_label_create(s_game_cont);
-    lv_label_set_text(title_lbl, "小恐龙跑酷");
-    lv_obj_set_style_text_color(title_lbl, lv_color_hex(0xf59e0b), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_lxgw_tghz_level1_3500_22_4,
-                               LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_pos(title_lbl, 40, 20);
+    /* 全屏跑道舞台先创建，顶部只保留得分浮层。 */
+    lv_obj_t *stage = lv_obj_create(s_game_cont);
+    lv_obj_set_pos(stage, 0, 0);
+    lv_obj_set_size(stage, kScreenWidth, kScreenHeight);
+    lv_obj_set_style_bg_color(stage, lv_color_hex(0xfef08a), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_remove_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(stage, LV_OBJ_FLAG_CLICKABLE);
+    /* 只接收触摸边沿；不能订阅 LV_EVENT_ALL 后在 redraw 回调中改样式。 */
+    lv_obj_add_event_cb(stage, mini_games_controller_dino_click_cb,
+                        LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(stage, mini_games_controller_dino_click_cb,
+                        LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(stage, mini_games_controller_dino_click_cb,
+                        LV_EVENT_PRESS_LOST, NULL);
 
-    /* 2. 右侧分数卡片 */
     lv_obj_t *score_card = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(score_card, 222, 20);
-    lv_obj_set_size(score_card, 148, 44);
+    lv_obj_set_pos(score_card, 218, 24);
+    lv_obj_set_size(score_card, 152, 48);
     lv_obj_set_style_bg_color(score_card, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(score_card, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_radius(score_card, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1123,27 +1401,14 @@ static void mini_games_controller_setup_dino(void)
     lv_obj_set_style_shadow_width(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(score_card, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(score_card, LV_OBJ_FLAG_SCROLLABLE);
+    s_game_score_panels[0] = score_card;
 
     s_dino_score_label = lv_label_create(score_card);
     lv_label_set_text(s_dino_score_label, "分数: 0");
     lv_obj_set_style_text_color(s_dino_score_label, lv_color_hex(0x1f2937), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_dino_score_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(s_dino_score_label, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_center(s_dino_score_label);
-
-    /* 3. 游戏舞台 (浅黄色跑道背景画布) */
-    lv_obj_t *stage = lv_obj_create(s_game_cont);
-    lv_obj_set_pos(stage, 40, 68);
-    lv_obj_set_size(stage, DINO_PLAY_AREA_W, DINO_PLAY_AREA_H);
-    lv_obj_set_style_bg_color(stage, lv_color_hex(0xfef08a), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(stage, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(stage, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(stage, lv_color_hex(0xe5e7eb), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_all(stage, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_remove_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(stage, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(stage, mini_games_controller_dino_click_cb, LV_EVENT_PRESSED, NULL);
 
     /* 3.1 绘制天空背景白云 (先创建的渲染在底层) */
     s_dino_cloud = lv_image_create(stage);
@@ -1179,10 +1444,13 @@ static void mini_games_controller_setup_dino(void)
     }
 
     s_dino_state_label = lv_label_create(stage);
-    lv_label_set_text(s_dino_state_label, "左屏下蹲 / 右屏跳跃");
+    lv_label_set_text(s_dino_state_label, "右屏轻触开始\n左屏按住下蹲");
+    lv_obj_set_size(s_dino_state_label, DINO_PLAY_AREA_W - 24, 56);
     lv_obj_set_style_text_color(s_dino_state_label, lv_color_hex(0xa16207), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_dino_state_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+    lv_obj_set_style_text_font(s_dino_state_label, &lv_font_montserrat_lxgw_common_5500_16_4,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(s_dino_state_label, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_center(s_dino_state_label);
 
     /* 4. 创建障碍物图像对象 (默认贴图仙人掌) */
@@ -1203,17 +1471,23 @@ static void mini_games_controller_setup_dino(void)
     /* 6. 底部控制栏 */
     lv_obj_t *back_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_LEFT, lv_color_hex(0xef4444), "退出", lv_color_hex(0x374151),
-        40, 412, 100, 34, lv_color_hex(0xffffff), true);
+        kControlLeftX, kControlsY, kControlLeftWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[0] = back_btn;
     lv_obj_add_event_cb(back_btn, mini_games_controller_game_back_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *restart_btn = mini_games_controller_create_icon_button(
         s_game_cont, "+", lv_color_hex(0xffffff), "重开", lv_color_hex(0xffffff),
-        148, 412, 114, 34, lv_color_hex(0xf59e0b), false);
+        kControlMiddleX, kControlsY, kControlMiddleWidth, kControlsHeight,
+        lv_color_hex(0xf59e0b), false);
+    s_game_controls[1] = restart_btn;
     lv_obj_add_event_cb(restart_btn, mini_games_controller_dino_restart_cb, LV_EVENT_CLICKED, NULL);
 
     s_dino_pause_btn = mini_games_controller_create_icon_button(
         s_game_cont, LV_SYMBOL_PAUSE, lv_color_hex(0xf59e0b), "暂停", lv_color_hex(0x374151),
-        256, 412, 114, 34, lv_color_hex(0xffffff), true);
+        kControlRightX, kControlsY, kControlRightWidth, kControlsHeight,
+        lv_color_hex(0xffffff), true);
+    s_game_controls[2] = s_dino_pause_btn;
     lv_obj_add_event_cb(s_dino_pause_btn, mini_games_controller_dino_pause_cb, LV_EVENT_CLICKED, NULL);
 }
 
@@ -1223,10 +1497,10 @@ static void mini_games_controller_refresh_dino(void)
         return;
     }
 
-    /* 每 50 分白天与夜晚经典昼夜交替 */
+    /* 每 250 分昼夜交替；约半分钟可完成一次完整手表短局节奏。 */
     bool night_mode = false;
     if (!s_game_dino.game_over) {
-        night_mode = (s_game_dino.score / 50) % 2 != 0;
+        night_mode = (s_game_dino.score / 250) % 2 != 0;
     }
 
     lv_color_t bg_color = night_mode ? lv_color_hex(0x1f2937) : lv_color_hex(0xfef08a);
@@ -1257,7 +1531,8 @@ static void mini_games_controller_refresh_dino(void)
     }
 
     /* 1. 2.5D 天空背景云朵漂移动画 */
-    if (!s_paused && !s_game_dino.game_over && s_game_dino.frame_count > 0) {
+    if (!s_paused && mini_game_dino_is_started(&s_game_dino) &&
+        !s_game_dino.game_over && s_game_dino.frame_count > 0) {
         s_dino_cloud_x -= 0.2f;
         if (s_dino_cloud_x + 32.0f < 0.0f) {
             s_dino_cloud_x = (float)DINO_PLAY_AREA_W;
@@ -1268,7 +1543,8 @@ static void mini_games_controller_refresh_dino(void)
     }
 
     /* 2. 地面沙尘狂奔飞移特效 */
-    if (!s_paused && !s_game_dino.game_over && s_game_dino.frame_count > 0) {
+    if (!s_paused && mini_game_dino_is_started(&s_game_dino) &&
+        !s_game_dino.game_over && s_game_dino.frame_count > 0) {
         for (uint8_t i = 0; i < 4; ++i) {
             s_dino_sand_x[i] -= s_game_dino.speed;
             if (s_dino_sand_x[i] + 3.0f < 0.0f) {
@@ -1325,23 +1601,39 @@ static void mini_games_controller_refresh_dino(void)
     }
 
     if (s_dino_score_label != NULL && lv_obj_is_valid(s_dino_score_label)) {
-        lv_label_set_text_fmt(s_dino_score_label, "分数: %lu", (unsigned long)s_game_dino.score);
+        const uint32_t stored_best = mini_games_progress_get_high_score(
+            MINI_GAMES_PROGRESS_DINO);
+        const uint32_t visible_best = s_game_dino.score > stored_best
+                                          ? s_game_dino.score
+                                          : stored_best;
+        lv_label_set_text_fmt(s_dino_score_label, "分数 %lu 最高 %lu",
+                              (unsigned long)s_game_dino.score,
+                              (unsigned long)visible_best);
+        const uint32_t milestone = s_game_dino.score / 100U;
+        if (milestone > s_dino_last_milestone) {
+            s_dino_last_milestone = milestone;
+            mini_games_controller_pulse(s_dino_score_label);
+        }
     }
 
     if (s_dino_state_label != NULL && lv_obj_is_valid(s_dino_state_label)) {
         if (s_game_dino.game_over) {
-            lv_label_set_text(s_dino_state_label, "游戏结束! 点击重开再试");
+            lv_label_set_text(s_dino_state_label, "游戏结束！\n点击重开再试");
             lv_obj_remove_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
+            if (!s_dino_game_over_recorded) {
+                s_dino_game_over_recorded = true;
+                mini_games_controller_submit_current_score();
+                mini_games_controller_pulse(s_dino_state_label);
+            }
         } else if (s_paused) {
-            lv_label_set_text(s_dino_state_label, "已暂停");
+            lv_label_set_text(s_dino_state_label,
+                              s_auto_paused ? "已自动暂停" : "已暂停");
+            lv_obj_remove_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
+        } else if (!mini_game_dino_is_started(&s_game_dino)) {
+            lv_label_set_text(s_dino_state_label, "右屏轻触开始\n左屏按住下蹲");
             lv_obj_remove_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
         } else {
-            if (s_game_dino.frame_count > 60) {
-                lv_obj_add_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_label_set_text(s_dino_state_label, "左屏下蹲 / 右屏跳跃");
-                lv_obj_remove_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
-            }
+            lv_obj_add_flag(s_dino_state_label, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -1366,27 +1658,35 @@ static void mini_games_controller_refresh_dino(void)
             }
         }
     }
+
+    mini_games_controller_set_controls_running(
+        mini_game_dino_is_started(&s_game_dino) && !s_paused &&
+        !s_game_dino.game_over);
 }
 
 static void mini_games_controller_dino_click_cb(lv_event_t *e)
 {
-    (void)e;
-    if (s_current_game != MINI_GAME_TYPE_DINO) {
+    if (s_current_game != MINI_GAME_TYPE_DINO || s_paused ||
+        mini_game_dino_is_game_over(&s_game_dino)) {
         return;
     }
 
+    const lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = lv_indev_active();
-    if (indev != NULL) {
+    if (indev != NULL && code == LV_EVENT_PRESSED) {
         lv_point_t click_point;
         lv_indev_get_point(indev, &click_point);
-        
-        // 绝对 X 坐标 < 205 代表左半屏点击，触发下蹲；否则触发跳跃
+
+        // 左半屏按住下蹲，右半屏轻触跳跃；分区保留单手可达性。
         if (click_point.x < 205) {
-            mini_game_dino_duck(&s_game_dino);
+            mini_game_dino_set_ducking(&s_game_dino, true);
         } else {
             mini_game_dino_jump(&s_game_dino);
         }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        mini_game_dino_set_ducking(&s_game_dino, false);
     }
+    /* 游戏 timer 会在事件返回后刷新，避免在 LVGL event/redraw 栈内递归失效。 */
 }
 
 static void mini_games_controller_dino_restart_cb(lv_event_t *e)
@@ -1395,6 +1695,9 @@ static void mini_games_controller_dino_restart_cb(lv_event_t *e)
     if (s_current_game == MINI_GAME_TYPE_DINO) {
         mini_game_dino_reset(&s_game_dino, mini_games_controller_seed());
         s_paused = false;
+        s_auto_paused = false;
+        s_dino_last_milestone = 0U;
+        s_dino_game_over_recorded = false;
         mini_games_controller_refresh_dino();
     }
 }
@@ -1402,8 +1705,10 @@ static void mini_games_controller_dino_restart_cb(lv_event_t *e)
 static void mini_games_controller_dino_pause_cb(lv_event_t *e)
 {
     (void)e;
-    s_paused = !s_paused;
-    mini_games_controller_refresh_dino();
+    if (mini_game_dino_is_started(&s_game_dino) &&
+        !mini_game_dino_is_game_over(&s_game_dino)) {
+        mini_games_controller_set_paused(!s_paused);
+    }
 }
 #endif
 
@@ -1416,6 +1721,7 @@ static void mini_games_controller_leave(void)
     }
 
     s_paused = false;
+    s_auto_paused = false;
     if (s_game_timer != NULL) {
         lv_timer_delete(s_game_timer);
         s_game_timer = NULL;
@@ -1428,6 +1734,11 @@ static void mini_games_controller_leave(void)
 void mini_games_controller_init(lv_ui *ui)
 {
     s_ui = ui;
+    const esp_err_t err = mini_games_progress_start();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mini game progress owner start failed: %s",
+                 esp_err_to_name(err));
+    }
 }
 
 void mini_games_controller_open(void)
@@ -1475,11 +1786,40 @@ void mini_games_controller_open(void)
     lv_screen_load_anim(s_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
 }
 
+#ifdef AGENT_PREVIEW_HOST
+void mini_games_controller_open_preview_game(uint8_t game_index)
+{
+    mini_games_controller_open();
+    if (game_index >= MINI_GAME_TYPE_2048 && game_index <= MINI_GAME_TYPE_DINO) {
+        mini_games_controller_switch_to_game((mini_game_type_t)game_index);
+    }
+}
+#endif
+
 void mini_games_controller_poll_ui(void)
 {
     if (!mini_games_controller_is_foreground()) {
         board_button_clear_events();
         return;
+    }
+
+    ui_refresh_policy_activity_snapshot_t activity = {0};
+    const bool standby = ui_refresh_policy_get_activity_snapshot(&activity) &&
+                         activity.standby;
+    const bool game_running =
+        s_current_game == MINI_GAME_TYPE_2048 ||
+#if !DISABLE_NEW_GAMES
+        (s_current_game == MINI_GAME_TYPE_FLAPPY &&
+         mini_game_flappy_is_started(&s_game_flappy)) ||
+        (s_current_game == MINI_GAME_TYPE_DINO &&
+         mini_game_dino_is_started(&s_game_dino)) ||
+#endif
+        false;
+    if (game_running && !s_paused &&
+        (standby || watch_nc_is_visible())) {
+        s_paused = true;
+        s_auto_paused = true;
+        mini_games_controller_refresh_current_game();
     }
 
     for (;;) {
@@ -1506,11 +1846,15 @@ void mini_games_controller_poll_ui(void)
                 mini_games_controller_set_paused(!s_paused);
 #if !DISABLE_NEW_GAMES
             } else if (s_current_game == MINI_GAME_TYPE_FLAPPY) {
-                s_paused = !s_paused;
-                mini_games_controller_refresh_flappy();
+                if (mini_game_flappy_is_started(&s_game_flappy) &&
+                    !mini_game_flappy_is_game_over(&s_game_flappy)) {
+                    mini_games_controller_set_paused(!s_paused);
+                }
             } else if (s_current_game == MINI_GAME_TYPE_DINO) {
-                s_paused = !s_paused;
-                mini_games_controller_refresh_dino();
+                if (mini_game_dino_is_started(&s_game_dino) &&
+                    !mini_game_dino_is_game_over(&s_game_dino)) {
+                    mini_games_controller_set_paused(!s_paused);
+                }
 #endif
             }
         }

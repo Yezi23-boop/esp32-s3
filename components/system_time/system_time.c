@@ -49,16 +49,16 @@ static bool system_time_is_unix_time_valid(int64_t unix_seconds)
 
 static void system_time_store_snapshot(const system_time_snapshot_t *snapshot)
 {
-    portENTER_CRITICAL(&s_snapshot_lock);
+    taskENTER_CRITICAL(&s_snapshot_lock);
     s_snapshot = *snapshot;
-    portEXIT_CRITICAL(&s_snapshot_lock);
+    taskEXIT_CRITICAL(&s_snapshot_lock);
 }
 
 static void system_time_load_snapshot(system_time_snapshot_t *snapshot)
 {
-    portENTER_CRITICAL(&s_snapshot_lock);
+    taskENTER_CRITICAL(&s_snapshot_lock);
     *snapshot = s_snapshot;
-    portEXIT_CRITICAL(&s_snapshot_lock);
+    taskEXIT_CRITICAL(&s_snapshot_lock);
 }
 
 static esp_err_t system_time_rtc_to_epoch(const pcf85063atl_time_t *rtc_time,

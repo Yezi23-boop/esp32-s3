@@ -125,13 +125,13 @@ static esp_err_t network_credentials_ensure_operation_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     if (s_operation_mutex == NULL)
     {
         s_operation_mutex =
             xSemaphoreCreateMutexStatic(&s_operation_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     return s_operation_mutex != NULL ? ESP_OK : ESP_FAIL;
 }
@@ -310,9 +310,9 @@ static void network_credentials_get_storage_copy(
         return;
     }
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     *storage_copy = s_runtime.storage;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -329,10 +329,10 @@ static void network_credentials_set_storage_copy(
         return;
     }
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.storage = *storage_copy;
     s_runtime.loaded = true;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 }
 
 /**
@@ -357,14 +357,14 @@ esp_err_t network_credentials_init(void)
         return ESP_FAIL;
     }
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     if (s_runtime.initialized)
     {
-        portEXIT_CRITICAL(&s_runtime_lock);
+        taskEXIT_CRITICAL(&s_runtime_lock);
         xSemaphoreGive(s_operation_mutex);
         return ESP_OK;
     }
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
 
     ret = network_credentials_ensure_nvs_ready();
     if (ret != ESP_OK)
@@ -380,9 +380,9 @@ esp_err_t network_credentials_init(void)
         return ret;
     }
 
-    portENTER_CRITICAL(&s_runtime_lock);
+    taskENTER_CRITICAL(&s_runtime_lock);
     s_runtime.initialized = true;
-    portEXIT_CRITICAL(&s_runtime_lock);
+    taskEXIT_CRITICAL(&s_runtime_lock);
     xSemaphoreGive(s_operation_mutex);
 
     ESP_LOGI(TAG, "recent Wi-Fi credentials initialized");

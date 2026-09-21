@@ -365,7 +365,7 @@ void McpServer::HandleToolCall(int id, const cJSON *params) {
       return;
     }
 
-    if (audio_codec_set_volume(volume_value) != ESP_OK) {
+    if (audio_codec_set_volume_preference(volume_value) != ESP_OK) {
       ReplyError(id, "Failed to set speaker volume");
       return;
     }

@@ -5,8 +5,9 @@
 
 #include "features/alerts/app_alert_manager.h"
 #include "features/danger_detection/danger_detection_service.h"
-#include "services/audio_mic_test_service.h"
-#include "services/background_service_manager.h"
+#include "services/audio_diag/audio_mic_test_service.h"
+#include "services/runtime/safety_monitor_policy.h"
+#include "services/safety/safety_monitor_session.h"
 #include "danger_detection_view.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -37,7 +38,7 @@ static void danger_detection_refresh_status(void);
 
 static const char *danger_detection_status_text(
     const danger_detection_snapshot_t *snapshot,
-    const background_service_manager_snapshot_t *manager_snapshot)
+    const safety_monitor_policy_snapshot_t *manager_snapshot)
 {
     const danger_detection_state_t state =
         snapshot != NULL ? snapshot->state : DANGER_DETECTION_STATE_IDLE;
@@ -51,28 +52,31 @@ static const char *danger_detection_status_text(
     }
 
     if (manager_snapshot != NULL) {
-        switch (manager_snapshot->danger_block_reason) {
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_USER_DISABLED:
+        switch (manager_snapshot->block_reason) {
+            case SAFETY_MONITOR_POLICY_BLOCK_USER_DISABLED:
                 return "未开启";
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_FOREGROUND_AUDIO:
+            case SAFETY_MONITOR_POLICY_BLOCK_FOREGROUND_AUDIO:
                 return "资源占用，暂时等待";
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_FOREGROUND_RUNTIME:
+            case SAFETY_MONITOR_POLICY_BLOCK_RUNTIME_COORDINATOR:
                 return "前台任务中，暂时等待";
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_POLICY:
+            case SAFETY_MONITOR_POLICY_BLOCK_MUSIC_PLAYBACK:
+                return "音乐播放中，安全告警关闭";
+            case SAFETY_MONITOR_POLICY_BLOCK_POWER:
                 if ((manager_snapshot->policy_flags &
                      POWER_POLICY_FLAG_MAINTENANCE) != 0U) {
                     return "维护中暂停";
                 }
                 return "资源占用，暂时等待";
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_MANAGER_NOT_READY:
+            case SAFETY_MONITOR_POLICY_BLOCK_NOT_READY:
                 return "后台未就绪";
-            case BACKGROUND_SERVICE_MANAGER_DANGER_BLOCK_NONE:
+            case SAFETY_MONITOR_POLICY_BLOCK_NONE:
             default:
                 break;
         }
     }
 
-    if (manager_snapshot != NULL && manager_snapshot->last_error != ESP_OK) {
+    // policy 不再镜像 session.last_error，直接读源头 session 快照。
+    if (safety_monitor_session_get_snapshot().last_error != ESP_OK) {
         return "监听异常";
     }
 
@@ -87,8 +91,8 @@ static const char *danger_detection_status_text(
         return "正在启动";
     }
     if (manager_snapshot != NULL &&
-        manager_snapshot->danger_should_run &&
-        !manager_snapshot->danger_runtime_running) {
+        manager_snapshot->should_run &&
+        !safety_monitor_session_get_snapshot().runtime_running) {
         return "正在启动";
     }
     if (state == DANGER_DETECTION_STATE_RUNNING) {
@@ -283,7 +287,7 @@ static void danger_detection_safety_monitor_event(bool enabled,
     (void)user_data;
 
     esp_err_t ret =
-        background_service_manager_set_danger_detection_enabled(enabled);
+        safety_monitor_policy_set_enabled(enabled);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "safety monitor switch failed: enabled=%d err=%s",
                  enabled, esp_err_to_name(ret));
@@ -377,8 +381,8 @@ static void danger_detection_refresh_status(void)
 
     const danger_detection_snapshot_t snapshot =
         danger_detection_service_get_snapshot();
-    const background_service_manager_snapshot_t manager_snapshot =
-        background_service_manager_get_snapshot();
+    const safety_monitor_policy_snapshot_t manager_snapshot =
+        safety_monitor_policy_get_snapshot();
     audio_mic_test_snapshot_t mic_snapshot = {0};
     (void)audio_mic_test_service_get_snapshot(&mic_snapshot);
     const char *last_result_text =
@@ -409,10 +413,10 @@ static void danger_detection_refresh_status(void)
         .sensitivity_mode = danger_detection_view_mode_from_service(
             danger_detection_service_get_sensitivity_mode()),
         .safety_monitor_enabled =
-            manager_snapshot.danger_enabled_by_user,
+            manager_snapshot.enabled_by_user,
         .mic_test_running =
             mic_snapshot.state == AUDIO_MIC_TEST_STATE_RUNNING,
-        .alert_visible = manager_snapshot.danger_enabled_by_user &&
+        .alert_visible = manager_snapshot.enabled_by_user &&
                          danger_detection_page_alert_visible(&snapshot),
     };
 
@@ -427,14 +431,14 @@ static void danger_detection_refresh_status(void)
 void danger_detection_controller_init(lv_ui *ui)
 {
     s_ui = ui;
-    (void)background_service_manager_init();
+    (void)safety_monitor_policy_init();
 }
 
 /**
  * @brief 打开危险识别页面并刷新后台 Safety Monitor 会话状态。
  *
- * 页面入口属于 UI 语义层，只表达“用户要查看危险识别状态”。实际音频资源、
- * 模型和告警状态由 background_service_manager 与 danger_detection_service
+ * 页面入口属于 UI 语义层，只表达"用户要查看危险识别状态"。实际音频资源、
+ * 模型和告警状态由 safety_monitor_policy 与 danger_detection_service
  * 统一编排。进入页面不会自动开启监听，页面退出也不再拥有 stop 生命周期。
  */
 void danger_detection_ui_open(void)

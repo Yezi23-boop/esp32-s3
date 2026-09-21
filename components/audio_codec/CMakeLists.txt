@@ -8,4 +8,5 @@ idf_component_register(
         driver
         esp_codec_dev
         i2c_manager
+        nvs_flash
 )

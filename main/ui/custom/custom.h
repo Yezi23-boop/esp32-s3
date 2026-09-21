@@ -20,6 +20,7 @@ extern "C"
 #include "clock_functions.h"  // 时钟功能模块
 #include "emissive_calendar_view.h"
 #include "main_dropdown_controller.h"
+#include "main_screen_runtime.h"
 #include "memory_watch_controller.h"
 #include "wifi_management_controller.h"
 #include "ui_font_assets.h"

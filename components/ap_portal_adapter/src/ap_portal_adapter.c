@@ -74,12 +74,12 @@ static esp_err_t ap_portal_adapter_ensure_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_portal_bootstrap_lock);
+    taskENTER_CRITICAL(&s_portal_bootstrap_lock);
     if (s_portal_mutex == NULL)
     {
         s_portal_mutex = xSemaphoreCreateMutexStatic(&s_portal_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_portal_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_portal_bootstrap_lock);
 
     return s_portal_mutex != NULL ? ESP_OK : ESP_FAIL;
 }

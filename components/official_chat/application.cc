@@ -17,7 +17,6 @@
 #include "protocols/mqtt_protocol.h"
 #include "protocols/websocket_protocol.h"
 #include "settings.h"
-#include "wifi_control.h"
 
 namespace official_chat
 {
@@ -129,25 +128,6 @@ namespace official_chat
           uxTaskGetStackHighWaterMark(xTaskGetCurrentTaskHandle());
       ESP_LOGI(kTag, "worker stack high watermark (%s): %u", reason,
                static_cast<unsigned>(watermark));
-    }
-
-    void UpdateWifiPowerSaveForState(DeviceState state)
-    {
-      switch (state)
-      {
-      case DeviceState::kConnecting:
-      case DeviceState::kListening:
-      case DeviceState::kSpeaking:
-        wifi_control_set_power_save(false);
-        break;
-      case DeviceState::kActivating:
-      case DeviceState::kUpgrading:
-      case DeviceState::kIdle:
-      case DeviceState::kUnknown:
-      default:
-        wifi_control_set_power_save(true);
-        break;
-      }
     }
 
   } // namespace
@@ -834,7 +814,6 @@ namespace official_chat
   {
     const DeviceState state = GetState();
     ESP_LOGI(kTag, "HandleStateChanged state=%s", DeviceStateToString(state));
-    UpdateWifiPowerSaveForState(state);
     if (shutting_down_.load(std::memory_order_acquire))
     {
       CancelGracefulButtonStop("shutdown");

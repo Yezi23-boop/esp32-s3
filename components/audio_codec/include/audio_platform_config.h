@@ -7,7 +7,7 @@
  */
 
 // 硬件链路默认采样率（Hz），影响 codec 与 I2S 总线初始化。
-#define AUDIO_PLATFORM_HW_SAMPLE_RATE 24000
+#define AUDIO_PLATFORM_HW_SAMPLE_RATE 48000
 // 硬件链路样本位宽（bit）。
 #define AUDIO_PLATFORM_HW_BITS_PER_SAMPLE 16
 // 逻辑输入声道数（应用读取后看到的通道数）。

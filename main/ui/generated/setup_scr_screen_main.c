@@ -593,31 +593,24 @@ void setup_scr_screen_main(lv_ui *ui)
     lv_obj_set_style_bg_opa(ui->screen_main_loudness, 0, LV_PART_KNOB|LV_STATE_DEFAULT);
     lv_obj_set_style_radius(ui->screen_main_loudness, 8, LV_PART_KNOB|LV_STATE_DEFAULT);
 
-    //Write codes screen_main_slider_1
-    ui->screen_main_slider_1 = lv_slider_create(ui->screen_main_Dropdown_menu);
-    lv_obj_set_pos(ui->screen_main_slider_1, 53, 156);
-    lv_obj_set_size(ui->screen_main_slider_1, 134, 23);
-    lv_slider_set_range(ui->screen_main_slider_1, 0, 100);
-    lv_slider_set_mode(ui->screen_main_slider_1, LV_SLIDER_MODE_NORMAL);
-    lv_slider_set_value(ui->screen_main_slider_1, 50, LV_ANIM_OFF);
+    //Write codes screen_main_music_button
+    ui->screen_main_music_button = lv_button_create(ui->screen_main_Dropdown_menu);
+    lv_obj_set_pos(ui->screen_main_music_button, 53, 145);
+    lv_obj_set_size(ui->screen_main_music_button, 134, 42);
+    lv_obj_set_style_radius(ui->screen_main_music_button, 14, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui->screen_main_music_button, 230, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui->screen_main_music_button, lv_color_hex(0xf5f7f6), LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui->screen_main_music_button, 1, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(ui->screen_main_music_button, lv_color_hex(0xcbd5d0), LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_width(ui->screen_main_music_button, 0, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui->screen_main_music_button, lv_color_hex(0x00d982), LV_PART_MAIN|LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(ui->screen_main_music_button, lv_color_hex(0x00b86e), LV_PART_MAIN|LV_STATE_CHECKED);
 
-    //Write style for screen_main_slider_1, Part: LV_PART_MAIN, State: LV_STATE_DEFAULT.
-    lv_obj_set_style_bg_opa(ui->screen_main_slider_1, 34, LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui->screen_main_slider_1, lv_color_hex(0x00ff8c), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_grad_dir(ui->screen_main_slider_1, LV_GRAD_DIR_NONE, LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(ui->screen_main_slider_1, 8, LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_width(ui->screen_main_slider_1, 0, LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_shadow_width(ui->screen_main_slider_1, 0, LV_PART_MAIN|LV_STATE_DEFAULT);
-
-    //Write style for screen_main_slider_1, Part: LV_PART_INDICATOR, State: LV_STATE_DEFAULT.
-    lv_obj_set_style_bg_opa(ui->screen_main_slider_1, 238, LV_PART_INDICATOR|LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui->screen_main_slider_1, lv_color_hex(0x00ff70), LV_PART_INDICATOR|LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_grad_dir(ui->screen_main_slider_1, LV_GRAD_DIR_NONE, LV_PART_INDICATOR|LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(ui->screen_main_slider_1, 8, LV_PART_INDICATOR|LV_STATE_DEFAULT);
-
-    //Write style for screen_main_slider_1, Part: LV_PART_KNOB, State: LV_STATE_DEFAULT.
-    lv_obj_set_style_bg_opa(ui->screen_main_slider_1, 0, LV_PART_KNOB|LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(ui->screen_main_slider_1, 8, LV_PART_KNOB|LV_STATE_DEFAULT);
+    ui->screen_main_music_button_label = lv_label_create(ui->screen_main_music_button);
+    lv_label_set_text(ui->screen_main_music_button_label, "音乐");
+    lv_obj_set_style_text_color(ui->screen_main_music_button_label, lv_color_hex(0x17372a), LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui->screen_main_music_button_label, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_center(ui->screen_main_music_button_label);
 
     //Write codes screen_main_img_1
     ui->screen_main_img_1 = lv_image_create(ui->screen_main_Dropdown_menu);
@@ -679,7 +672,7 @@ void setup_scr_screen_main(lv_ui *ui)
     ui->screen_main_date_label = lv_label_create(ui->screen_main_cont_1);
     lv_obj_set_pos(ui->screen_main_date_label, 42, 24);
     lv_obj_set_style_text_color(ui->screen_main_date_label, lv_color_hex(0x1B3024), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui->screen_main_date_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui->screen_main_date_label, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
     lv_label_set_text(ui->screen_main_date_label, "周二 06/18");
 
     // 3. Create battery percentage label and battery progress bar (top-right)
@@ -687,7 +680,7 @@ void setup_scr_screen_main(lv_ui *ui)
     ui->screen_main_battery_label = lv_label_create(ui->screen_main_cont_1);
     lv_obj_set_pos(ui->screen_main_battery_label, 314, 24);
     lv_obj_set_style_text_color(ui->screen_main_battery_label, lv_color_hex(0x1B3024), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui->screen_main_battery_label, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui->screen_main_battery_label, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
     lv_label_set_text(ui->screen_main_battery_label, "80%");
 
     // Battery Bar container: x: 298, y: 27, size: 28x14, border: 1, radius: 3
@@ -755,7 +748,7 @@ void setup_scr_screen_main(lv_ui *ui)
     // Weather Unit "°C": (Right-side: Chinese 16px, aligned to top-right of temp label)
     lv_obj_t *weather_unit = lv_label_create(ui->screen_main_weather_card);
     lv_obj_set_style_text_color(weather_unit, lv_color_hex(0x1B3024), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(weather_unit, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(weather_unit, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
     lv_label_set_text(weather_unit, "°C");
     lv_obj_align_to(weather_unit, ui->screen_main_weather_temp, LV_ALIGN_OUT_RIGHT_TOP, 2, 4);
 
@@ -763,14 +756,14 @@ void setup_scr_screen_main(lv_ui *ui)
     ui->screen_main_weather_text = lv_label_create(ui->screen_main_weather_card);
     lv_obj_set_pos(ui->screen_main_weather_text, 172, 94);
     lv_obj_set_style_text_color(ui->screen_main_weather_text, lv_color_hex(0x1B3024), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui->screen_main_weather_text, &lv_font_montserrat_lxgw_tghz_level1_3500_22_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui->screen_main_weather_text, &lv_font_montserrat_lxgw_common_5500_22_4, LV_PART_MAIN|LV_STATE_DEFAULT);
     lv_label_set_text(ui->screen_main_weather_text, "多云");
 
     // High/Low Temperature range: (Right-side: Chinese 16px, pos: 172, 128)
     ui->screen_main_weather_range = lv_label_create(ui->screen_main_weather_card);
     lv_obj_set_pos(ui->screen_main_weather_range, 172, 128);
     lv_obj_set_style_text_color(ui->screen_main_weather_range, lv_color_hex(0x4E6557), LV_PART_MAIN|LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui->screen_main_weather_range, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui->screen_main_weather_range, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN|LV_STATE_DEFAULT);
     lv_label_set_text(ui->screen_main_weather_range, "最高 28°C / 最低 19°C");
 
     // Invoke clock timer once to update date/time and battery stats immediately

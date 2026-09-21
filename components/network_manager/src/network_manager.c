@@ -119,12 +119,12 @@ static esp_err_t network_manager_ensure_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_manager_bootstrap_lock);
+    taskENTER_CRITICAL(&s_manager_bootstrap_lock);
     if (s_manager_mutex == NULL)
     {
         s_manager_mutex = xSemaphoreCreateMutexStatic(&s_manager_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_manager_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_manager_bootstrap_lock);
 
     return s_manager_mutex != NULL ? ESP_OK : ESP_FAIL;
 }
@@ -294,6 +294,14 @@ static esp_err_t network_manager_start_selected_transport(void)
         return ret;
 
     case NETWORK_MANAGER_PROVISIONING_TRANSPORT_SOFTAP:
+        /* SoftAP 与普通 BLE presence 共享片内资源；先确认 BLE host 已停止，
+         * 再创建门户和 AP，避免两个 transport 并发初始化。 */
+        ret = ble_presence_stop();
+        if (ret != ESP_OK)
+        {
+            s_state = NETWORK_MANAGER_STATE_ERROR;
+            return ret;
+        }
         /* 先确保自定义门户 HTTPD 已创建，再把同一个 handle 复用给官方 SoftAP
          * provisioning。否则设备端即使起了 AP，也没有我们的页面资源和入口。 */
         ret = ap_portal_adapter_start();
@@ -945,6 +953,31 @@ esp_err_t network_manager_start_softap_provisioning(void)
 
     ret = network_manager_start_explicit_transport(
         NETWORK_MANAGER_PROVISIONING_TRANSPORT_SOFTAP);
+    xSemaphoreGive(s_manager_mutex);
+    return ret;
+}
+
+/**
+ * @brief 停止当前 active provisioning transport。
+ * @return `ESP_OK` 表示已停止或本就空闲；其他错误表示 stop/deinit 失败。
+ */
+esp_err_t network_manager_stop_provisioning(void)
+{
+    esp_err_t ret = network_manager_ensure_mutex();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    if (xSemaphoreTake(s_manager_mutex, portMAX_DELAY) != pdTRUE)
+    {
+        return ESP_FAIL;
+    }
+
+    ret = network_manager_stop_active_transport();
+    if (ret == ESP_OK)
+    {
+        network_manager_refresh_runtime_state(false);
+    }
     xSemaphoreGive(s_manager_mutex);
     return ret;
 }

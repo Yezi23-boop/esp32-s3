@@ -90,10 +90,10 @@ static bool ap_portal_get_memory_watch_config_callback(
         return false;
     }
 
-    portENTER_CRITICAL(&s_memory_watch_config_lock);
+    taskENTER_CRITICAL(&s_memory_watch_config_lock);
     *out_callback = s_memory_watch_config_callback;
     *out_user_ctx = s_memory_watch_config_user_ctx;
-    portEXIT_CRITICAL(&s_memory_watch_config_lock);
+    taskEXIT_CRITICAL(&s_memory_watch_config_lock);
 
     return *out_callback != NULL;
 }
@@ -106,10 +106,10 @@ static bool ap_portal_get_memory_watch_configured_callback(
         return false;
     }
 
-    portENTER_CRITICAL(&s_memory_watch_config_lock);
+    taskENTER_CRITICAL(&s_memory_watch_config_lock);
     *out_callback = s_memory_watch_configured_callback;
     *out_user_ctx = s_memory_watch_configured_user_ctx;
-    portEXIT_CRITICAL(&s_memory_watch_config_lock);
+    taskEXIT_CRITICAL(&s_memory_watch_config_lock);
 
     return *out_callback != NULL;
 }
@@ -522,10 +522,10 @@ static esp_err_t ap_portal_captive_redirect_error_handler(httpd_req_t *req,
 esp_err_t ap_portal_routes_set_memory_watch_config_callback(
     ap_portal_memory_watch_config_cb_t callback, void *user_ctx)
 {
-    portENTER_CRITICAL(&s_memory_watch_config_lock);
+    taskENTER_CRITICAL(&s_memory_watch_config_lock);
     s_memory_watch_config_callback = callback;
     s_memory_watch_config_user_ctx = user_ctx;
-    portEXIT_CRITICAL(&s_memory_watch_config_lock);
+    taskEXIT_CRITICAL(&s_memory_watch_config_lock);
 
     return ESP_OK;
 }
@@ -533,10 +533,10 @@ esp_err_t ap_portal_routes_set_memory_watch_config_callback(
 esp_err_t ap_portal_routes_set_memory_watch_configured_callback(
     ap_portal_memory_watch_configured_cb_t callback, void *user_ctx)
 {
-    portENTER_CRITICAL(&s_memory_watch_config_lock);
+    taskENTER_CRITICAL(&s_memory_watch_config_lock);
     s_memory_watch_configured_callback = callback;
     s_memory_watch_configured_user_ctx = user_ctx;
-    portEXIT_CRITICAL(&s_memory_watch_config_lock);
+    taskEXIT_CRITICAL(&s_memory_watch_config_lock);
 
     return ESP_OK;
 }

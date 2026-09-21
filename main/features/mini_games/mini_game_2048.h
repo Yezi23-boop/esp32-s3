@@ -22,6 +22,8 @@ typedef enum {
 typedef struct {
     bool moved;
     bool game_over;
+    bool just_won;
+    bool waiting_for_continue;
     uint32_t gained_score;
 } mini_game_2048_move_result_t;
 
@@ -30,6 +32,8 @@ typedef struct {
     uint32_t score;
     uint32_t rng_state;
     bool game_over;
+    bool won;
+    bool continue_after_win;
 } mini_game_2048_t;
 
 /**
@@ -86,6 +90,23 @@ uint32_t mini_game_2048_get_score(const mini_game_2048_t *game);
  * @return true 表示没有空格且没有相邻可合并格子。
  */
 bool mini_game_2048_is_game_over(const mini_game_2048_t *game);
+
+/**
+ * @brief 判断本局是否首次到达 2048 且正在等待用户选择。
+ *
+ * @param[in] game 游戏状态对象。
+ * @return true 表示应暂停棋盘并显示“继续挑战 / 新游戏”。
+ */
+bool mini_game_2048_is_waiting_for_continue(const mini_game_2048_t *game);
+
+/**
+ * @brief 确认胜利并继续当前棋盘。
+ *
+ * 每局只在首次合成 2048 时暂停一次；确认后可继续合成更大的方块。
+ *
+ * @param[in,out] game 游戏状态对象。
+ */
+void mini_game_2048_continue(mini_game_2048_t *game);
 
 /**
  * @brief 直接装载棋盘，用于 source tests 或后续恢复局面。

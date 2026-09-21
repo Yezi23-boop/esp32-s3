@@ -55,8 +55,9 @@ esp_err_t danger_sample_recorder_init(
 /**
  * @brief 重置当前采集会话。
  *
- * 递增 generation、清空 PCM ring、取消未完成 capture。用于危险识别后台
- * 服务 start/stop 边界，不销毁 worker/queue，避免普通开关后无法再次启动。
+ * 递增 generation、清空 PCM ring、取消未完成 capture。在危险识别后台
+ * 服务每次 start 时调用，保证新会话从干净状态开始；销毁 worker/queue
+ * 由 stop 路径的 danger_sample_recorder_deinit() 负责。
  */
 void danger_sample_recorder_reset_session(void);
 
@@ -64,6 +65,13 @@ void danger_sample_recorder_reset_session(void);
  * @brief 反初始化危险样本录制器，释放资源。
  */
 void danger_sample_recorder_deinit(void);
+
+/**
+ * @brief 检查录制器是否已初始化。
+ *
+ * @return true 表示已初始化，即 worker/queue/ring buffer 等资源已就绪。
+ */
+bool danger_sample_recorder_is_initialized(void);
 
 /**
  * @brief 触发样本录制。

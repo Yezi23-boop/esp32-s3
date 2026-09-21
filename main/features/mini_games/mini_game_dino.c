@@ -4,6 +4,9 @@
 static const float kGravity = 0.45f;
 static const float kJumpImpulse = -7.2f;
 static const float kInitialSpeed = 3.0f;
+static const float kMaxSpeed = 6.0f;
+static const uint32_t kPterodactylUnlockScore = 250U;
+static const uint32_t kScoreFramesPerPoint = 3U;
 static const uint32_t kDefaultSeed = 0x87654321U;
 
 static uint32_t mini_game_dino_next_random(mini_game_dino_t *game)
@@ -22,8 +25,9 @@ static void mini_game_dino_randomize_obstacle(mini_game_dino_t *game, dino_obsta
     obs->passed = false;
     obs->active = true;
 
-    // 如果分数 >= 30，有 30% 概率生成翼龙障碍，否则只生成仙人掌
-    if (game->score >= 30 && (mini_game_dino_next_random(game) % 10) < 3) {
+    // 手表短局在约 30 秒后解锁翼龙，保留原版“后段新增障碍类型”的节奏。
+    if (game->score >= kPterodactylUnlockScore &&
+        (mini_game_dino_next_random(game) % 10) < 3) {
         obs->type = DINO_OBSTACLE_PTERODACTYL;
         obs->w = 24;
         obs->h = 20;
@@ -57,6 +61,7 @@ void mini_game_dino_reset(mini_game_dino_t *game, uint32_t seed)
     game->rng_state = seed != 0U ? seed : kDefaultSeed;
     game->dino_y = (float)(DINO_GROUND_Y - DINO_HEIGHT);
     game->dino_vy = 0.0f;
+    game->started = false;
     game->is_jumping = false;
     game->score = 0;
     game->game_over = false;
@@ -73,44 +78,34 @@ void mini_game_dino_jump(mini_game_dino_t *game)
     if (game == NULL || game->game_over || game->is_jumping) {
         return;
     }
+    game->started = true;
     game->dino_vy = kJumpImpulse;
     game->is_jumping = true;
     game->is_ducking = false;
-    game->duck_timer = 0;
 }
 
-void mini_game_dino_duck(mini_game_dino_t *game)
+void mini_game_dino_set_ducking(mini_game_dino_t *game, bool pressed)
 {
     if (game == NULL || game->game_over) {
         return;
     }
-    if (game->is_jumping) {
-        // 空中下蹲：触发快速下坠 (Fast Fall)
+
+    if (pressed && game->is_jumping && !game->is_ducking) {
+        // 空中首次按下触发一次快速下坠，持续按住不会重复叠加速度。
         game->dino_vy += 3.5f;
-        game->is_ducking = true;
-        game->duck_timer = 15; // 落地后保持下蹲一定时间
-    } else {
-        // 地面下蹲：保持20帧
-        game->is_ducking = true;
-        game->duck_timer = 20;
     }
+    game->is_ducking = pressed;
 }
 
 void mini_game_dino_step(mini_game_dino_t *game)
 {
-    if (game == NULL || game->game_over) {
+    if (game == NULL || game->game_over || !game->started) {
         return;
     }
 
     game->frame_count++;
-
-    // 更新下蹲时间
-    if (game->is_ducking) {
-        if (game->duck_timer > 0) {
-            game->duck_timer--;
-        } else {
-            game->is_ducking = false;
-        }
+    if ((game->frame_count % kScoreFramesPerPoint) == 0U) {
+        ++game->score;
     }
 
     // 1. 步进恐龙物理状态
@@ -124,17 +119,13 @@ void mini_game_dino_step(mini_game_dino_t *game)
             game->dino_y = ground_limit;
             game->dino_vy = 0.0f;
             game->is_jumping = false;
-            // 若不是由空中划蹲落地，则退出下蹲
-            if (game->duck_timer == 0) {
-                game->is_ducking = false;
-            }
         }
     }
 
-    // 2. 随分数逐渐加速，增加挑战性
-    game->speed = kInitialSpeed + (float)(game->score / 50) * 0.2f;
-    if (game->speed > 6.0f) {
-        game->speed = 6.0f;
+    // 按奔跑距离连续加速；手表短局约一分钟达到最高速度。
+    game->speed = kInitialSpeed + (float)game->score * 0.006f;
+    if (game->speed > kMaxSpeed) {
+        game->speed = kMaxSpeed;
     }
 
     // 3. 移动障碍物并判定碰撞、计分
@@ -188,10 +179,9 @@ void mini_game_dino_step(mini_game_dino_t *game)
             }
         }
 
-        // 计分判定：成功跳过障碍
+        // 只记录障碍是否已通过；分数按持续奔跑距离推进。
         if (!obs->passed && obs_x2 < dino_x1) {
             obs->passed = true;
-            game->score += 10;
         }
     }
 }
@@ -204,4 +194,9 @@ uint32_t mini_game_dino_get_score(const mini_game_dino_t *game)
 bool mini_game_dino_is_game_over(const mini_game_dino_t *game)
 {
     return game != NULL ? game->game_over : true;
+}
+
+bool mini_game_dino_is_started(const mini_game_dino_t *game)
+{
+    return game != NULL && game->started;
 }

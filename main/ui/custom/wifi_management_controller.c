@@ -5,10 +5,11 @@
 
 #include "esp_log.h"
 #include "network_manager.h"
+#include "services/network/network_service.h"
 
 LV_FONT_DECLARE(lv_font_montserrat_lxgw_lv_font_wifi_subset_16_16_4);
 LV_FONT_DECLARE(lv_font_montserrat_lxgw_lv_font_wifi_subset_24_24_4);
-LV_FONT_DECLARE(lv_font_montserrat_lxgw_tghz_level1_3500_16_4);
+LV_FONT_DECLARE(lv_font_montserrat_lxgw_common_5500_16_4);
 
 static const char *TAG = "wifi_mgmt_ui";
 static const uint32_t kStatusRefreshMs = 300U;
@@ -30,12 +31,13 @@ static void wifi_management_controller_refresh(void);
 static void wifi_management_controller_ensure_screen_created(void);
 static void wifi_management_controller_reset_screen_refs(void);
 static bool wifi_management_controller_get_status(
-    network_manager_status_t *status);
+    network_service_wifi_status_t *status);
 static lv_obj_t *wifi_management_controller_create_action_button(
     lv_obj_t *parent, const char *text, const char *left_icon, const char *right_icon, uint32_t text_color_hex, uint32_t left_icon_color_hex, lv_coord_t x, lv_coord_t y);
 static void wifi_management_controller_set_locked(lv_obj_t *obj, bool locked);
 static void wifi_management_controller_refresh_action_lock_state(
-    const network_manager_status_t *status);
+    const network_service_wifi_status_t *status,
+    const network_service_snapshot_t *service_snapshot);
 static bool wifi_management_controller_is_screen_alive(void);
 static void wifi_management_controller_show_inline_message(
     const char *title, const char *detail);
@@ -54,6 +56,7 @@ static void wifi_management_controller_show_inline_message(
 static void wifi_management_screen_delete_event_cb(lv_event_t *e)
 {
     (void)e;
+    (void)network_service_request_stop_provisioning();
     wifi_management_controller_reset_screen_refs();
 }
 
@@ -64,6 +67,8 @@ static void wifi_management_screen_delete_event_cb(lv_event_t *e)
 static void wifi_management_back_event_cb(lv_event_t *e)
 {
     (void)e;
+
+    (void)network_service_request_stop_provisioning();
 
     if (s_ui == NULL || s_ui->screen_main == NULL)
     {
@@ -134,7 +139,7 @@ static void wifi_management_ble_provision_event_cb(lv_event_t *e)
     esp_err_t ret = ESP_OK;
 
     ESP_LOGI(TAG, "request BLE provisioning from Wi-Fi page");
-    ret = network_manager_start_ble_provisioning();
+    ret = network_service_request_ble();
     if (ret == ESP_ERR_INVALID_STATE)
     {
         wifi_management_controller_show_inline_message(
@@ -166,7 +171,7 @@ static void wifi_management_softap_provision_event_cb(lv_event_t *e)
     esp_err_t ret = ESP_OK;
 
     ESP_LOGI(TAG, "request SoftAP provisioning from Wi-Fi page");
-    ret = network_manager_start_softap_provisioning();
+    ret = network_service_request_portal();
     if (ret != ESP_OK)
     {
         ESP_LOGW(TAG, "start SoftAP provisioning failed: %s",
@@ -206,7 +211,7 @@ static void wifi_management_status_timer_cb(lv_timer_t *timer)
  * @return true 表示读取成功；false 表示状态暂不可用。
  */
 static bool wifi_management_controller_get_status(
-    network_manager_status_t *status)
+    network_service_wifi_status_t *status)
 {
     if (status == NULL)
     {
@@ -214,9 +219,9 @@ static bool wifi_management_controller_get_status(
     }
 
     memset(status, 0, sizeof(*status));
-    if (network_manager_get_status(status) != ESP_OK)
+    if (network_service_get_wifi_status(status) != ESP_OK)
     {
-        ESP_LOGW(TAG, "failed to read network manager status");
+        ESP_LOGW(TAG, "failed to read network service Wi-Fi status");
         return false;
     }
 
@@ -445,10 +450,11 @@ static void wifi_management_controller_set_locked(lv_obj_t *obj, bool locked)
  *
  * 其余操作暂保持原样，避免扩大本轮改动范围。
  *
- * @param[in] status 当前 `network_manager` 快照。
+ * @param[in] status 当前 `network_service` Wi-Fi 快照。
  */
 static void wifi_management_controller_refresh_action_lock_state(
-    const network_manager_status_t *status)
+    const network_service_wifi_status_t *status,
+    const network_service_snapshot_t *service_snapshot)
 {
     if (status == NULL)
     {
@@ -456,13 +462,18 @@ static void wifi_management_controller_refresh_action_lock_state(
     }
 
     const bool provisioning_locked =
+        (service_snapshot != NULL &&
+         service_snapshot->provisioning_transition_pending) ||
         status->ble_active ||
-        (status->state == NETWORK_MANAGER_STATE_PROVISIONING_BLE) ||
-        (status->state == NETWORK_MANAGER_STATE_PROVISIONING_SOFTAP);
+        status->provisioning_active;
 
     wifi_management_controller_set_locked(s_ble_provision_btn,
                                           provisioning_locked);
     wifi_management_controller_set_locked(s_softap_provision_btn,
+                                          provisioning_locked);
+    wifi_management_controller_set_locked(s_disconnect_btn,
+                                          provisioning_locked);
+    wifi_management_controller_set_locked(s_retry_saved_btn,
                                           provisioning_locked);
 }
 
@@ -492,12 +503,13 @@ static void wifi_management_controller_show_inline_message(
  * @brief 刷新 Wi-Fi 管理页状态文本与设置态。
  *
  * 页面顶部状态区只表达用户可理解的联网语义，不直接暴露底层 driver
- * 细节。这里统一从 `network_manager` 读取状态，避免 UI 直接依赖旧的
- * `network_service` 兼容层。
+ * 细节。这里统一读取 `network_service` 发布的纯快照，避免 UI timer
+ * 顺手推进底层 network_manager 状态。
  */
 static void wifi_management_controller_refresh(void)
 {
-    network_manager_status_t status = {0};
+    network_service_wifi_status_t status = {0};
+    network_service_snapshot_t service_snapshot = {0};
     char detail[96] = {0};
 
     if (!wifi_management_controller_is_screen_alive() ||
@@ -513,12 +525,37 @@ static void wifi_management_controller_refresh(void)
         lv_label_set_text(s_status_detail, "当前通道错误");
         return;
     }
+    (void)network_service_get_snapshot(&service_snapshot);
 
-    wifi_management_controller_refresh_action_lock_state(&status);
+    wifi_management_controller_refresh_action_lock_state(&status,
+                                                         &service_snapshot);
 
     uint32_t status_color_hex = 0x8E8E93;
 
-    if (status.ble_active && status.wifi_connected)
+    if (service_snapshot.provisioning_transition_pending)
+    {
+        lv_label_set_text(s_status_title, "启动中");
+        status_color_hex = 0x0A84FF; // Apple Blue
+        snprintf(detail, sizeof(detail), "正在切换配网通道");
+    }
+    else if (service_snapshot.provisioning_generation != 0U &&
+             service_snapshot.provisioning_last_error != ESP_OK &&
+             !status.wifi_connected &&
+             !status.ble_active &&
+             !status.ap_active)
+    {
+        lv_label_set_text(s_status_title, "配网失败");
+        status_color_hex = 0xFF453A; // Apple Red
+        if (service_snapshot.provisioning_last_error == ESP_ERR_INVALID_STATE)
+        {
+            snprintf(detail, sizeof(detail), "请先打开蓝牙总开关");
+        }
+        else
+        {
+            snprintf(detail, sizeof(detail), "请重试或切换通道");
+        }
+    }
+    else if (status.ble_active && status.wifi_connected)
     {
         lv_label_set_text(s_status_title, "已连接");
         status_color_hex = 0x32D74B; // Apple Green
@@ -550,27 +587,26 @@ static void wifi_management_controller_refresh(void)
             snprintf(detail, sizeof(detail), "Wi-Fi 已连接");
         }
     }
-    else if (status.state == NETWORK_MANAGER_STATE_CONNECTING_LATEST)
+    else if (status.service_state == NETWORK_SERVICE_STATE_CONNECTING)
     {
         lv_label_set_text(s_status_title, "连接中");
         status_color_hex = 0x0A84FF; // Apple Blue
         snprintf(detail, sizeof(detail), "正在尝试保存的网络");
     }
-    else if (status.state == NETWORK_MANAGER_STATE_PROVISIONING_BLE ||
-             status.state == NETWORK_MANAGER_STATE_PROVISIONING_SOFTAP)
+    else if (status.provisioning_active)
     {
         lv_label_set_text(s_status_title, "配网中");
         status_color_hex = 0x0A84FF; // Apple Blue
-        snprintf(detail, sizeof(detail), "当前通道: %s", 
-                 status.state == NETWORK_MANAGER_STATE_PROVISIONING_BLE ? "蓝牙" : "AP");
+        snprintf(detail, sizeof(detail), "当前通道: %s",
+                 status.ap_active ? "AP" : "蓝牙");
     }
-    else if (status.state == NETWORK_MANAGER_STATE_DISCONNECTED_BY_USER)
+    else if (status.user_disconnect_latched)
     {
         lv_label_set_text(s_status_title, "未连接");
         status_color_hex = 0x8E8E93; // Apple Gray
         snprintf(detail, sizeof(detail), "自动重连已暂停");
     }
-    else if (status.state == NETWORK_MANAGER_STATE_ERROR)
+    else if (status.service_state == NETWORK_SERVICE_STATE_ERROR)
     {
         lv_label_set_text(s_status_title, "错误");
         status_color_hex = 0xFF453A; // Apple Red
@@ -680,7 +716,7 @@ static void wifi_management_controller_ensure_screen_created(void)
     lv_obj_t *status_lbl = lv_label_create(s_status_panel);
     lv_label_set_text(status_lbl, "状态");
     lv_obj_set_style_text_color(status_lbl, lv_color_hex(0x8D9099), LV_PART_MAIN);
-    lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, LV_PART_MAIN);
+    lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_lxgw_common_5500_16_4, LV_PART_MAIN);
     lv_obj_align(status_lbl, LV_ALIGN_TOP_LEFT, 20, 16);
 
     // 状态呼吸灯

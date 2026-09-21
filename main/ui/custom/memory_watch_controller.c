@@ -6,9 +6,13 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#ifndef AGENT_PREVIEW_HOST
+#include "esp_heap_caps.h"
+#endif
 #include "lvgl.h"
 #include "memory_watch_view.h"
-#include "services/memory_watch_service.h"
+#include "services/memory_watch/memory_watch_service.h"
+#include "services/music/music_service.h"
 #include "ui_chinese_fonts.h"
 
 static const char *TAG = "memory_watch_ui";
@@ -42,10 +46,15 @@ static memory_watch_render_cache_t s_render_cache = {0};
 static memory_watch_view_page_t s_render_page = MEMORY_WATCH_VIEW_PAGE_VOICE;
 static size_t s_selected_inbox_index = 0;
 static lv_obj_t *s_back_screen = NULL;
+#ifdef AGENT_PREVIEW_HOST
 static memory_watch_service_conversation_item_t
     s_conversation_items[MEMORY_WATCH_SERVICE_CONVERSATION_MAX_ITEMS];
 static memory_watch_view_conversation_item_t
     s_conversation_view_items[MEMORY_WATCH_SERVICE_CONVERSATION_MAX_ITEMS];
+#else
+static memory_watch_service_conversation_item_t *s_conversation_items = NULL;
+static memory_watch_view_conversation_item_t *s_conversation_view_items = NULL;
+#endif
 static size_t s_conversation_item_count = 0;
 static uint32_t s_conversation_revision = 0;
 
@@ -105,25 +114,81 @@ static void memory_watch_controller_set_preview_detail(size_t index)
 }
 #else
 /* 板端：summary 缓冲区，controller 在 generation 变化时刷新 */
-static memory_watch_inbox_summary_t
-    s_inbox_summaries[MEMORY_WATCH_INBOX_CTRL_MAX];
-static memory_watch_view_inbox_item_t
-    s_inbox_view_items[MEMORY_WATCH_INBOX_CTRL_MAX];
+static memory_watch_inbox_summary_t *s_inbox_summaries = NULL;
+static memory_watch_view_inbox_item_t *s_inbox_view_items = NULL;
 static size_t  s_inbox_item_count   = 0;
 static uint8_t s_inbox_unread_count = 0;
 static uint32_t s_inbox_generation  = 0;
 /* 详情缓冲区：进入详情时按 ID 拷贝完整 item */
-static memory_watch_inbox_item_t s_inbox_detail;
+static memory_watch_inbox_item_t *s_inbox_detail = NULL;
 static bool s_inbox_detail_valid = false;
 #endif
 
 static void memory_watch_controller_refresh(void);
+
+#ifndef AGENT_PREVIEW_HOST
+/**
+ * @brief 分配 Hermes 页面只读缓存。
+ *
+ * 这些数组只在 LVGL task 中被刷新/读取，不参与 DMA 和 ISR，因此放到 PSRAM
+ * 可以释放 internal heap，给 BLE provisioning、TLS 和前台音频留下连续块。
+ */
+static bool memory_watch_controller_alloc_psram_caches(void)
+{
+    if (s_conversation_items == NULL)
+    {
+        s_conversation_items =
+            (memory_watch_service_conversation_item_t *)heap_caps_calloc(
+                MEMORY_WATCH_SERVICE_CONVERSATION_MAX_ITEMS,
+                sizeof(memory_watch_service_conversation_item_t),
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_conversation_view_items == NULL)
+    {
+        s_conversation_view_items =
+            (memory_watch_view_conversation_item_t *)heap_caps_calloc(
+                MEMORY_WATCH_SERVICE_CONVERSATION_MAX_ITEMS,
+                sizeof(memory_watch_view_conversation_item_t),
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_inbox_summaries == NULL)
+    {
+        s_inbox_summaries = (memory_watch_inbox_summary_t *)heap_caps_calloc(
+            MEMORY_WATCH_INBOX_CTRL_MAX, sizeof(memory_watch_inbox_summary_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_inbox_view_items == NULL)
+    {
+        s_inbox_view_items =
+            (memory_watch_view_inbox_item_t *)heap_caps_calloc(
+                MEMORY_WATCH_INBOX_CTRL_MAX,
+                sizeof(memory_watch_view_inbox_item_t),
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_inbox_detail == NULL)
+    {
+        s_inbox_detail = (memory_watch_inbox_item_t *)heap_caps_calloc(
+            1U, sizeof(memory_watch_inbox_item_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+
+    return s_conversation_items != NULL &&
+           s_conversation_view_items != NULL &&
+           s_inbox_summaries != NULL &&
+           s_inbox_view_items != NULL &&
+           s_inbox_detail != NULL;
+}
+#endif
 
 static const memory_watch_view_inbox_item_t *memory_watch_inbox_items(void)
 {
 #ifdef AGENT_PREVIEW_HOST
     return s_preview_inbox_items;
 #else
+    if (s_inbox_view_items == NULL)
+    {
+        return NULL;
+    }
     return s_inbox_view_items;
 #endif
 }
@@ -162,6 +227,11 @@ static uint8_t memory_watch_inbox_unread_count(void)
 #ifndef AGENT_PREVIEW_HOST
 static void memory_watch_controller_sync_inbox(void)
 {
+    if (s_inbox_summaries == NULL || s_inbox_view_items == NULL)
+    {
+        return;
+    }
+
     memory_watch_inbox_meta_t meta = {0};
     if (memory_watch_service_get_inbox_meta(&meta) != ESP_OK)
     {
@@ -254,6 +324,13 @@ static void memory_watch_copy_text(char *dst, size_t dst_size,
 static const memory_watch_view_conversation_item_t *
 memory_watch_conversation_view_items(void)
 {
+#ifndef AGENT_PREVIEW_HOST
+    if (s_conversation_items == NULL || s_conversation_view_items == NULL)
+    {
+        return NULL;
+    }
+#endif
+
     for (size_t i = 0; i < s_conversation_item_count; ++i)
     {
         switch (s_conversation_items[i].role)
@@ -287,6 +364,15 @@ static void memory_watch_controller_sync_conversation(
         return;
     }
 
+#ifndef AGENT_PREVIEW_HOST
+    if (s_conversation_items == NULL)
+    {
+        s_conversation_item_count = 0;
+        s_conversation_revision = snapshot->conversation_generation;
+        return;
+    }
+#endif
+
     size_t count = 0;
     if (memory_watch_service_copy_conversation_items(
             s_conversation_items, MEMORY_WATCH_SERVICE_CONVERSATION_MAX_ITEMS,
@@ -295,6 +381,19 @@ static void memory_watch_controller_sync_conversation(
         s_conversation_item_count = count;
         s_conversation_revision = snapshot->conversation_generation;
     }
+}
+
+static const char *memory_watch_controller_detail_body(void)
+{
+    if (!s_inbox_detail_valid)
+    {
+        return NULL;
+    }
+#ifdef AGENT_PREVIEW_HOST
+    return s_inbox_detail.body;
+#else
+    return s_inbox_detail != NULL ? s_inbox_detail->body : NULL;
+#endif
 }
 
 static memory_watch_view_connection_state_t memory_watch_connection_state(
@@ -343,6 +442,22 @@ static const char *memory_watch_state_text(
     case MEMORY_WATCH_SERVICE_STATE_UPLOADING:
         return "上传中";
     case MEMORY_WATCH_SERVICE_STATE_THINKING:
+        if (strcmp(snapshot->progress_phase, "recognized") == 0)
+        {
+            return "已识别你的问题";
+        }
+        if (strcmp(snapshot->progress_phase, "searching") == 0)
+        {
+            return "正在搜索";
+        }
+        if (strcmp(snapshot->progress_phase, "executing") == 0)
+        {
+            return "正在执行任务";
+        }
+        if (strcmp(snapshot->progress_phase, "composing") == 0)
+        {
+            return "正在整理结果";
+        }
         return "思考中";
     case MEMORY_WATCH_SERVICE_STATE_NEEDS_CLARIFICATION:
         return "需要补充说明";
@@ -712,9 +827,16 @@ static void memory_watch_controller_open_inbox_item(size_t index,
             --s_inbox_unread_count;
         }
         /* 拷贝详情（含 body）供 detail 页使用 */
-        const esp_err_t detail_err =
-            memory_watch_service_get_inbox_item(nid, &s_inbox_detail);
-        s_inbox_detail_valid = (detail_err == ESP_OK);
+        if (s_inbox_detail != NULL)
+        {
+            const esp_err_t detail_err =
+                memory_watch_service_get_inbox_item(nid, s_inbox_detail);
+            s_inbox_detail_valid = (detail_err == ESP_OK);
+        }
+        else
+        {
+            s_inbox_detail_valid = false;
+        }
     }
 #endif
     s_render_page = MEMORY_WATCH_VIEW_PAGE_INBOX_DETAIL;
@@ -800,7 +922,7 @@ static void memory_watch_controller_refresh(void)
         .inbox_item_count = memory_watch_inbox_item_count(),
         .selected_inbox_index = s_selected_inbox_index,
         .inbox_unread_count = memory_watch_inbox_unread_count(),
-        .detail_body = s_inbox_detail_valid ? s_inbox_detail.body : NULL,
+        .detail_body = memory_watch_controller_detail_body(),
         .voice_button_enabled = memory_watch_can_use_voice_button(&snapshot),
         .cancel_visible =
             busy ||
@@ -820,6 +942,12 @@ static void memory_watch_controller_refresh(void)
 void memory_watch_controller_init(lv_ui *ui)
 {
     s_ui = ui;
+#ifndef AGENT_PREVIEW_HOST
+    if (!memory_watch_controller_alloc_psram_caches())
+    {
+        ESP_LOGE(TAG, "memory watch UI PSRAM cache allocation failed");
+    }
+#endif
 }
 
 void memory_watch_controller_open(void)
@@ -833,6 +961,8 @@ void memory_watch_controller_open(void)
         return;
     }
 
+    /* Hermes 需要独占扬声器和麦克风；音乐 owner 自行停流并释放输出。 */
+    (void)music_service_pause_for_hermes_page();
     s_render_page = MEMORY_WATCH_VIEW_PAGE_VOICE;
     (void)memory_watch_service_set_foreground(true);
     (void)memory_watch_service_check_health();
@@ -903,6 +1033,7 @@ void memory_watch_controller_open_via_notification(watch_nc_nav_target_t target,
     /* 3. 设置页面渲染状态 */
     if (target == WATCH_NC_NAV_HERMES_VOICE)
     {
+        (void)music_service_pause_for_hermes_page();
         s_render_page = MEMORY_WATCH_VIEW_PAGE_VOICE;
         (void)memory_watch_service_set_foreground(true);
     }
@@ -948,9 +1079,16 @@ void memory_watch_controller_open_via_notification(watch_nc_nav_target_t target,
                 break;
             }
         }
-        const esp_err_t detail_err =
-            memory_watch_service_get_inbox_item(notification_id, &s_inbox_detail);
-        s_inbox_detail_valid = (detail_err == ESP_OK);
+        if (s_inbox_detail != NULL)
+        {
+            const esp_err_t detail_err =
+                memory_watch_service_get_inbox_item(notification_id, s_inbox_detail);
+            s_inbox_detail_valid = (detail_err == ESP_OK);
+        }
+        else
+        {
+            s_inbox_detail_valid = false;
+        }
 #endif
     }
 

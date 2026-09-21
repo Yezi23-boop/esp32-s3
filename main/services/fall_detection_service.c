@@ -1,5 +1,6 @@
 #include "services/fall_detection_service.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -11,8 +12,8 @@
 #include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "services/imu_service.h"
-#include "services/watch_endpoint_service.h"
+#include "services/sensors/imu_service.h"
+#include "services/memory_watch/watch_endpoint_service.h"
 
 static const char *k_fall_app_danger_type = "fall";
 static const char *k_fall_app_message = "检测到跌倒";
@@ -26,12 +27,32 @@ static const UBaseType_t k_window_queue_length = 1U;
 static const uint32_t k_task_stack_bytes = 6144U;
 static const UBaseType_t k_task_priority = 2U;
 static const char *k_model_name = "cnn_v1_recall90_6ch_2s";
-/* V1 recall90 调试模型输入：50Hz × 2s × 6ch = 100 × 6 = 600 */
+/* V1 recall90 调试模型输入：50Hz × 2s × 6ch = 100 × 6 = 600。 */
+static const uint16_t k_model_pre_event_frames = 35U;
 static const float k_degrees_to_radians = 0.017453292519943295f;
+static const float k_radians_to_degrees = 57.29577951308232f;
 static const float k_fall_clear_threshold = 0.50f; // 后续事件窗口低风险时允许提前解除已确认跌倒。
 static const uint32_t k_fall_clear_window_count = 2U; // 仅作为事件窗口低风险恢复证据。
 static const TickType_t k_alert_receive_timeout_ticks = pdMS_TO_TICKS(250); // 兼作一键销毁请求的最大响应延迟。
 static const int64_t k_fall_alert_auto_clear_us = 5LL * 1000LL * 1000LL; // 本地红屏/告警最多保持 5 秒。
+static const uint16_t k_post_gravity_start_frame = 150U; // 事件后 2~3 秒，用于姿态变化。
+static const uint16_t k_post_gravity_frame_count = 50U;
+static const uint16_t k_low_motion_start_frame = 150U; // 事件后 2~5 秒，用于摔后静止确认。
+static const uint16_t k_low_motion_frame_count = 150U;
+static const float k_posture_change_threshold_deg = 45.0f;
+static const float k_low_motion_gyro_mean_max_radps = 0.44f;
+static const float k_low_motion_gyro_peak_max_radps = 1.40f;
+static const float k_low_motion_acc_norm_std_max_mps2 = 1.96f;
+static const float k_strong_fall_candidate_threshold = 0.90f;
+
+typedef enum
+{
+    FALL_DETECTION_WINDOW_CONTRACT_OK = 0,
+    FALL_DETECTION_WINDOW_CONTRACT_BASIC_MISMATCH = 1U << 0,
+    FALL_DETECTION_WINDOW_CONTRACT_MODEL_SLICE = 1U << 1,
+    FALL_DETECTION_WINDOW_CONTRACT_POST_CHECK = 1U << 2,
+} fall_detection_window_contract_error_t;
+
 typedef enum
 {
     FALL_DETECTION_ALERT_EVENT_NONE = 0,
@@ -48,6 +69,19 @@ typedef struct
     float fall_prob;
     int64_t window_end_time_us;
 } fall_detection_alert_event_t;
+
+typedef struct
+{
+    bool is_candidate;
+    bool low_motion;
+    bool posture_change;
+    bool strong_fallback;
+    bool confirmed;
+    float gyro_norm_mean_radps;
+    float gyro_norm_max_radps;
+    float acc_norm_std_mps2;
+    float posture_angle_deg;
+} fall_detection_post_check_t;
 
 typedef struct
 {
@@ -299,8 +333,44 @@ static bool fall_detection_destroy_requested(void)
     return requested;
 }
 
+static uint32_t fall_detection_validate_window_contract(
+    const imu_service_accel_window_t *window)
+{
+    uint32_t errors = FALL_DETECTION_WINDOW_CONTRACT_OK;
+    if (window->frame_count != IMU_SERVICE_WINDOW_FRAME_COUNT ||
+        window->sample_rate_hz != IMU_SERVICE_SAMPLE_RATE_HZ ||
+        window->trigger_frame_index != IMU_SERVICE_EVENT_PRE_FRAMES)
+    {
+        errors |= FALL_DETECTION_WINDOW_CONTRACT_BASIC_MISMATCH;
+    }
+
+    if (window->trigger_frame_index < k_model_pre_event_frames)
+    {
+        errors |= FALL_DETECTION_WINDOW_CONTRACT_MODEL_SLICE;
+    }
+    else
+    {
+        const uint16_t model_start_frame =
+            (uint16_t)(window->trigger_frame_index - k_model_pre_event_frames);
+        if ((model_start_frame + FALL_MODEL_FRAME_COUNT) > window->frame_count)
+        {
+            errors |= FALL_DETECTION_WINDOW_CONTRACT_MODEL_SLICE;
+        }
+    }
+
+    if ((k_post_gravity_start_frame + k_post_gravity_frame_count) >
+            window->frame_count ||
+        (k_low_motion_start_frame + k_low_motion_frame_count) >
+            window->frame_count ||
+        IMU_SERVICE_EVENT_PRE_FRAMES > window->frame_count)
+    {
+        errors |= FALL_DETECTION_WINDOW_CONTRACT_POST_CHECK;
+    }
+    return errors;
+}
+
 /**
- * @brief 将 2s 事件窗口填充为 V1 6ch 模型输入。
+ * @brief 从 6s 事件窗口提取 2s 子窗口并填充为 V1 6ch 模型输入。
  *
  * 布局按帧交错：[accX, accY, accZ, gyroX, gyroY, gyroZ] × 100帧。
  * 输入窗口已是 imu_service 输出的修正后右手系板级物理轴，禁止再套旧 raw chip
@@ -317,23 +387,157 @@ static void fall_detection_fill_model_input(
     const imu_service_accel_window_t *window,
     float input[FALL_MODEL_INPUT_ELEMENTS])
 {
-    for (uint16_t frame = 0; frame < IMU_SERVICE_WINDOW_FRAME_COUNT; ++frame)
+    const uint16_t model_start_frame =
+        (uint16_t)(window->trigger_frame_index - k_model_pre_event_frames);
+    for (uint16_t frame = 0; frame < FALL_MODEL_FRAME_COUNT; ++frame)
     {
-        const uint16_t base = frame * 6U;
+        const uint16_t window_frame = (uint16_t)(model_start_frame + frame);
+        const uint16_t base = frame * FALL_MODEL_CHANNEL_COUNT;
         /* 加速度：m/s^2，按坐标映射 */
-        input[base + 0U] =  window->accel[frame].x;
-        input[base + 1U] =  window->accel[frame].y;
-        input[base + 2U] = -window->accel[frame].z;
+        input[base + 0U] =  window->accel[window_frame].x;
+        input[base + 1U] =  window->accel[window_frame].y;
+        input[base + 2U] = -window->accel[window_frame].z;
         /* 陀螺仪：deg/s -> rad/s，按坐标映射 */
-        input[base + 3U] =  window->gyro[frame].x * k_degrees_to_radians;
-        input[base + 4U] =  window->gyro[frame].y * k_degrees_to_radians;
-        input[base + 5U] = -window->gyro[frame].z * k_degrees_to_radians;
+        input[base + 3U] =  window->gyro[window_frame].x * k_degrees_to_radians;
+        input[base + 4U] =  window->gyro[window_frame].y * k_degrees_to_radians;
+        input[base + 5U] = -window->gyro[window_frame].z * k_degrees_to_radians;
     }
+}
+
+static float fall_detection_accel_norm_mps2(const imu_sensor_accel_t *accel)
+{
+    return sqrtf((accel->x * accel->x) +
+                 (accel->y * accel->y) +
+                 (accel->z * accel->z));
+}
+
+static float fall_detection_gyro_norm_radps(const imu_sensor_gyro_t *gyro)
+{
+    const float x = gyro->x * k_degrees_to_radians;
+    const float y = gyro->y * k_degrees_to_radians;
+    const float z = gyro->z * k_degrees_to_radians;
+    return sqrtf((x * x) + (y * y) + (z * z));
+}
+
+static imu_sensor_accel_t fall_detection_average_accel(
+    const imu_service_accel_window_t *window,
+    uint16_t start_frame,
+    uint16_t frame_count)
+{
+    imu_sensor_accel_t average = {0};
+    for (uint16_t frame = 0; frame < frame_count; ++frame)
+    {
+        const imu_sensor_accel_t *accel = &window->accel[start_frame + frame];
+        average.x += accel->x;
+        average.y += accel->y;
+        average.z += accel->z;
+    }
+    const float scale = 1.0f / (float)frame_count;
+    average.x *= scale;
+    average.y *= scale;
+    average.z *= scale;
+    return average;
+}
+
+static float fall_detection_gravity_angle_deg(const imu_sensor_accel_t *pre,
+                                              const imu_sensor_accel_t *post)
+{
+    const float pre_norm = fall_detection_accel_norm_mps2(pre);
+    const float post_norm = fall_detection_accel_norm_mps2(post);
+    if (pre_norm <= 0.001f || post_norm <= 0.001f)
+    {
+        return 0.0f;
+    }
+
+    const float dot = (pre->x * post->x) +
+                      (pre->y * post->y) +
+                      (pre->z * post->z);
+    float cosine = dot / (pre_norm * post_norm);
+    if (cosine > 1.0f)
+    {
+        cosine = 1.0f;
+    }
+    else if (cosine < -1.0f)
+    {
+        cosine = -1.0f;
+    }
+    return acosf(cosine) * k_radians_to_degrees;
+}
+
+static fall_detection_post_check_t fall_detection_run_post_check(
+    const imu_service_accel_window_t *window,
+    const fall_model_result_t *result)
+{
+    fall_detection_post_check_t check = {
+        .is_candidate = result->fall_prob >= FALL_MODEL_THRESHOLD_DEFAULT,
+    };
+    if (!check.is_candidate)
+    {
+        return check;
+    }
+
+    float gyro_norm_sum = 0.0f;
+    float gyro_norm_max = 0.0f;
+    float acc_norm_sum = 0.0f;
+    float acc_norm_square_sum = 0.0f;
+    for (uint16_t frame = 0; frame < k_low_motion_frame_count; ++frame)
+    {
+        const uint16_t window_frame =
+            (uint16_t)(k_low_motion_start_frame + frame);
+        const float gyro_norm =
+            fall_detection_gyro_norm_radps(&window->gyro[window_frame]);
+        const float acc_norm =
+            fall_detection_accel_norm_mps2(&window->accel[window_frame]);
+        gyro_norm_sum += gyro_norm;
+        if (gyro_norm > gyro_norm_max)
+        {
+            gyro_norm_max = gyro_norm;
+        }
+        acc_norm_sum += acc_norm;
+        acc_norm_square_sum += acc_norm * acc_norm;
+    }
+
+    const float low_motion_count = (float)k_low_motion_frame_count;
+    check.gyro_norm_mean_radps = gyro_norm_sum / low_motion_count;
+    check.gyro_norm_max_radps = gyro_norm_max;
+    const float acc_norm_mean = acc_norm_sum / low_motion_count;
+    float acc_norm_variance =
+        (acc_norm_square_sum / low_motion_count) -
+        (acc_norm_mean * acc_norm_mean);
+    if (acc_norm_variance < 0.0f)
+    {
+        acc_norm_variance = 0.0f;
+    }
+    check.acc_norm_std_mps2 = sqrtf(acc_norm_variance);
+    check.low_motion =
+        check.gyro_norm_mean_radps < k_low_motion_gyro_mean_max_radps &&
+        check.gyro_norm_max_radps < k_low_motion_gyro_peak_max_radps &&
+        check.acc_norm_std_mps2 < k_low_motion_acc_norm_std_max_mps2;
+
+    const imu_sensor_accel_t pre_gravity =
+        fall_detection_average_accel(window, 0U, IMU_SERVICE_EVENT_PRE_FRAMES);
+    const imu_sensor_accel_t post_gravity =
+        fall_detection_average_accel(window,
+                                     k_post_gravity_start_frame,
+                                     k_post_gravity_frame_count);
+    check.posture_angle_deg =
+        fall_detection_gravity_angle_deg(&pre_gravity, &post_gravity);
+    check.posture_change =
+        check.posture_angle_deg > k_posture_change_threshold_deg;
+
+    check.strong_fallback =
+        result->fall_prob >= k_strong_fall_candidate_threshold &&
+        check.low_motion;
+    check.confirmed =
+        check.low_motion &&
+        (check.posture_change || check.strong_fallback);
+    return check;
 }
 
 static fall_detection_alert_event_t fall_detection_update_alert_state(
     const imu_service_accel_window_t *window,
-    const fall_model_result_t *result)
+    const fall_model_result_t *result,
+    const fall_detection_post_check_t *post_check)
 {
     const bool is_event_window = window->trigger_flags != 0U;
     fall_detection_alert_event_t event = {
@@ -349,7 +553,8 @@ static fall_detection_alert_event_t fall_detection_update_alert_state(
     {
         s_fall_detection.snapshot.clear_window_count = 0;
         if (is_event_window &&
-            result->fall_prob >= FALL_MODEL_THRESHOLD_DEFAULT)
+            post_check->is_candidate &&
+            post_check->confirmed)
         {
             s_fall_detection.snapshot.alert_state =
                 FALL_DETECTION_ALERT_STATE_CONFIRMED;
@@ -566,19 +771,17 @@ static void fall_detection_task(void *arg)
             s_fall_detection.current_window;
         fall_detection_store_window_received(window);
 
-        if (window->frame_count !=
-                IMU_SERVICE_WINDOW_FRAME_COUNT ||
-            window->sample_rate_hz !=
-                IMU_SERVICE_SAMPLE_RATE_HZ ||
-            window->trigger_frame_index !=
-                IMU_SERVICE_EVENT_PRE_FRAMES)
+        const uint32_t contract_errors =
+            fall_detection_validate_window_contract(window);
+        if (contract_errors != FALL_DETECTION_WINDOW_CONTRACT_OK)
         {
             ESP_LOGW(TAG,
-                     "事件窗口契约不匹配: 序号=%u 帧数=%u 采样率=%u 触发帧=%u",
+                     "事件窗口契约不匹配: 序号=%u 帧数=%u 采样率=%u 触发帧=%u 错误=0x%02x",
                      (unsigned)window->sequence,
                      (unsigned)window->frame_count,
                      (unsigned)window->sample_rate_hz,
-                     (unsigned)window->trigger_frame_index);
+                     (unsigned)window->trigger_frame_index,
+                     (unsigned)contract_errors);
             fall_detection_store_inference_error(ESP_ERR_INVALID_SIZE);
             continue;
         }
@@ -625,8 +828,36 @@ static void fall_detection_task(void *arg)
                  (long long)window->trigger_time_us,
                  (long long)window->end_time_us);
 
+        const fall_detection_post_check_t post_check =
+            fall_detection_run_post_check(window, &result);
+        if (post_check.is_candidate)
+        {
+            ESP_LOGI(TAG,
+                     "候选表 | 窗口=%-4u 来源采样=%-6u flags=0x%02x | fall_prob=%.4f 阈值=%.2f 强兜底阈值=%.2f",
+                     (unsigned)window->sequence,
+                     (unsigned)window->source_sample_count,
+                     (unsigned)window->trigger_flags,
+                     (double)result.fall_prob,
+                     (double)FALL_MODEL_THRESHOLD_DEFAULT,
+                     (double)k_strong_fall_candidate_threshold);
+            ESP_LOGI(TAG,
+                     "post检查表 | 窗口=%-4u low_motion=%u posture_change=%u strong=%u confirmed=%u | gyro_mean=%.3f_radps gyro_max=%.3f_radps acc_std=%.3f_mps2 posture_angle=%.1f_deg | trigger_acc=%.2f_mps2 trigger_gyro=%.2f_radps trigger_jerk=%.2f_mps2pf",
+                     (unsigned)window->sequence,
+                     (unsigned)(post_check.low_motion ? 1U : 0U),
+                     (unsigned)(post_check.posture_change ? 1U : 0U),
+                     (unsigned)(post_check.strong_fallback ? 1U : 0U),
+                     (unsigned)(post_check.confirmed ? 1U : 0U),
+                     (double)post_check.gyro_norm_mean_radps,
+                     (double)post_check.gyro_norm_max_radps,
+                     (double)post_check.acc_norm_std_mps2,
+                     (double)post_check.posture_angle_deg,
+                     (double)window->trigger_acc_norm_mps2,
+                     (double)window->trigger_gyro_norm_radps,
+                     (double)window->trigger_jerk_mps2_per_frame);
+        }
+
         const fall_detection_alert_event_t alert_event =
-            fall_detection_update_alert_state(window, &result);
+            fall_detection_update_alert_state(window, &result, &post_check);
         fall_detection_handle_alert_event(&alert_event);
 
         const fall_detection_alert_event_t timeout_event =

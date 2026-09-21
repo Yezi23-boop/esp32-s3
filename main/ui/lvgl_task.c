@@ -8,8 +8,6 @@
 #include "esp_timer.h"
 #include "events_init.h"
 #include "features/alerts/display_alert_adapter.h"
-#include "features/weather/hptts.h"
-#include "features/weather/time_weather.h"
 #include "gui_guider.h"
 #include "iot_button.h"
 #include "lv_demos.h"
@@ -18,12 +16,15 @@
 #include "lvgl_task.h"
 #include "nvs_flash.h"
 #include "printf_esp32.h"
-#include "services/startup_readiness.h"
+#include "services/runtime/startup_readiness.h"
 #include "ui/custom/ai_ui_controller.h"
 #include "ui/custom/custom.h"
 #include "ui/custom/danger_detection_controller.h"
 #include "ui/custom/memory_watch_controller.h"
+#include "ui/custom/music_controller.h"
 #include "ui/custom/mini_games_controller.h"
+#include "ui/custom/ota_maintenance_view.h"
+#include "ui/custom/ui_font_assets.h"
 #include "ui/custom/wifi_management_controller.h"
 #include "ui_refresh_policy.h"
 
@@ -88,6 +89,12 @@ void lvgl_task(void *pvParameter)
     ESP_LOGI(TAG, "Starting application");
     lv_port_init_small();
     ESP_LOGI(TAG, "boot_stage: display_foundation_done");
+    /* AI/Hermes 共用一次 raw Noto mmap，启动期校验可在首次进入页面前暴露资源问题。 */
+    const esp_err_t font_assets_ret = ui_font_assets_init();
+    if (font_assets_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Noto font assets unavailable: %s",
+                 esp_err_to_name(font_assets_ret));
+    }
     // lv_demo_benchmark();
     // lv_demo_stress();
 
@@ -95,8 +102,10 @@ void lvgl_task(void *pvParameter)
     ai_ui_controller_init(&guider_ui);
     danger_detection_controller_init(&guider_ui);
     memory_watch_controller_init(&guider_ui);
+    music_controller_init(&guider_ui);
     mini_games_controller_init(&guider_ui);
     wifi_management_controller_init(&guider_ui);
+    (void)ota_maintenance_view_init();
     events_init(&guider_ui);
     custom_init(&guider_ui);
     ui_refresh_policy_init();
@@ -117,7 +126,9 @@ void lvgl_task(void *pvParameter)
         display_alert_adapter_process_ui();
         danger_detection_controller_poll_ui();
         memory_watch_controller_poll_ui();
+        music_controller_poll_ui();
         mini_games_controller_poll_ui();
+        ota_maintenance_view_poll();
 
         next_call = lv_timer_handler();
         ui_refresh_policy_poll();

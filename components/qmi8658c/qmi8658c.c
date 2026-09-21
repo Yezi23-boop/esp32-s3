@@ -281,7 +281,7 @@ static esp_err_t qmi8658c_read_raw(qmi8658c_raw_sample_t *sample)
     ++s_read_count;
     if (s_read_count <= 5U || (s_read_count % 100U) == 0U)
     {
-        ESP_LOGI(TAG,
+        ESP_LOGD(TAG,
                  "原始表 | 次数=%-5u 状态0=0x%02X 就绪=%d 时间戳=%-8u | 加速度raw[x y z]=%6d %6d %6d | 陀螺仪raw[x y z]=%6d %6d %6d | 温度raw=%d",
                  (unsigned)s_read_count,
                  out.status0,

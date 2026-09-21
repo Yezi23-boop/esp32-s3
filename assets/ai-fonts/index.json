@@ -1,4 +1,18 @@
 {
-  "version": 1,
-  "text_font": "font_puhui_common_20_4.bin"
+  "version": 2,
+  "bundle": "noto-v1",
+  "text_font": "font_noto_sans_common_20_4.bin",
+  "text_font_meta": {
+    "bundle": "noto-v1",
+    "charset": "common",
+    "size": 20,
+    "bpp": 4
+  },
+  "hermes_text_font": "font_noto_sans_common_16_4.bin",
+  "hermes_text_font_meta": {
+    "bundle": "noto-v1",
+    "charset": "common",
+    "size": 16,
+    "bpp": 4
+  }
 }

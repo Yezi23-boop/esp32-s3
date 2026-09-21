@@ -461,7 +461,7 @@ lv_obj_t *emissive_calendar_view_show(lv_obj_t *anchor,
 
     state->title = calendar_create_label(state->card, calendar_month_name(state->month),
                                          0, 22, kCardW, 34,
-                                         &lv_font_montserrat_lxgw_tghz_level1_3500_27_4,
+                                         &lv_font_montserrat_lxgw_tghz_static_27_4,
                                          lv_color_hex(0x242029));
 
     (void)calendar_create_arrow(state->card, 14, false,
@@ -473,7 +473,7 @@ lv_obj_t *emissive_calendar_view_show(lv_obj_t *anchor,
     for (int i = 0; i < 7; ++i) {
         (void)calendar_create_label(state->card, kWeekdays[i],
                                     27 + i * 46 - 14, 78, 28, 24,
-                                    &lv_font_montserrat_lxgw_tghz_level1_3500_16_4,
+                                    &lv_font_montserrat_lxgw_common_5500_16_4,
                                     lv_color_hex(0x86868b));
     }
 

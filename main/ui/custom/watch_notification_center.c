@@ -15,12 +15,13 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
-#include "services/memory_watch_service.h"
+#include "services/memory_watch/memory_watch_service.h"
 #include "ui_chinese_fonts.h"
 #include "features/danger_detection/danger_detection_service.h"
-#include "services/background_service_manager.h"
+#include "services/runtime/safety_monitor_policy.h"
 
 static const char *TAG = "watch_nc";
 
@@ -373,7 +374,7 @@ void watch_nc_init(const watch_nc_config_t *config)
     lv_obj_set_style_text_color(s_bubble_title_label, lv_color_hex(0x111111), 0);
     lv_label_set_long_mode(s_bubble_title_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(s_bubble_title_label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, 0);
+                               &lv_font_montserrat_lxgw_common_5500_16_4, 0);
     lv_obj_align(s_bubble_title_label, LV_ALIGN_TOP_LEFT, 32, 12);
 
     /* preview：深灰炭黑内容简述（支持两行显示，超出截断省略） */
@@ -382,7 +383,7 @@ void watch_nc_init(const watch_nc_config_t *config)
     lv_obj_set_style_text_color(s_bubble_preview_label, lv_color_hex(0x333333), 0);
     lv_label_set_long_mode(s_bubble_preview_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(s_bubble_preview_label,
-                               &lv_font_montserrat_lxgw_tghz_level1_3500_16_4, 0);
+                               &lv_font_montserrat_lxgw_common_5500_16_4, 0);
     lv_obj_align(s_bubble_preview_label, LV_ALIGN_TOP_LEFT, 32, 34);
 
     /* 手势事件 */
@@ -411,8 +412,8 @@ static bool nc_is_blocked(void)
 
     bool safety_alert_active = false;
     const danger_detection_snapshot_t dd_snap = danger_detection_service_get_snapshot();
-    const background_service_manager_snapshot_t bsm_snap = background_service_manager_get_snapshot();
-    if (bsm_snap.danger_enabled_by_user &&
+    const safety_monitor_policy_snapshot_t bsm_snap = safety_monitor_policy_get_snapshot();
+    if (bsm_snap.enabled_by_user &&
         dd_snap.state == DANGER_DETECTION_STATE_RUNNING &&
         dd_snap.risk_state == DANGER_DETECTION_RISK_ALERTING)
     {
@@ -423,12 +424,37 @@ static bool nc_is_blocked(void)
 }
 
 #define NC_SUMMARY_SCRATCH_MAX 20U
-static memory_watch_inbox_summary_t s_nc_scratch[NC_SUMMARY_SCRATCH_MAX]
-    __attribute__((section(".ext_ram.bss")));
+static memory_watch_inbox_summary_t *s_nc_scratch = NULL;
+
+/**
+ * @brief 为 notification center 的 inbox summary scratch 分配 PSRAM。
+ *
+ * 该 scratch 只在 LVGL timer poll 中短时使用，不参与 DMA/ISR；运行期分配比
+ * `.ext_ram.bss` 更明确，避免在未开启 external BSS sdkconfig 时仍落到 internal RAM。
+ */
+static bool nc_ensure_scratch(void)
+{
+    if (s_nc_scratch == NULL)
+    {
+        s_nc_scratch = (memory_watch_inbox_summary_t *)heap_caps_calloc(
+            NC_SUMMARY_SCRATCH_MAX, sizeof(memory_watch_inbox_summary_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_nc_scratch == NULL)
+    {
+        ESP_LOGW(TAG, "notification center PSRAM scratch unavailable");
+        return false;
+    }
+    return true;
+}
 
 void watch_nc_poll(bool is_recording, bool safety_alert_active)
 {
     if (s_bubble_cont == NULL)
+    {
+        return;
+    }
+    if (!nc_ensure_scratch())
     {
         return;
     }
@@ -656,4 +682,10 @@ void watch_nc_notify_hermes_reply(const char *request_id)
 void watch_nc_set_inbox_list_active(bool active)
 {
     s_inbox_list_active = active;
+}
+
+bool watch_nc_is_visible(void)
+{
+    return s_bubble_state == NC_BUBBLE_VISIBLE ||
+           s_bubble_state == NC_BUBBLE_VISIBLE_UPDATED;
 }

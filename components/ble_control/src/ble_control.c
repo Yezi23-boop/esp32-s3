@@ -60,12 +60,12 @@ static esp_err_t ble_control_ensure_mutex(void)
         return ESP_OK;
     }
 
-    portENTER_CRITICAL(&s_ble_bootstrap_lock);
+    taskENTER_CRITICAL(&s_ble_bootstrap_lock);
     if (s_ble_mutex == NULL)
     {
         s_ble_mutex = xSemaphoreCreateMutexStatic(&s_ble_mutex_buffer);
     }
-    portEXIT_CRITICAL(&s_ble_bootstrap_lock);
+    taskEXIT_CRITICAL(&s_ble_bootstrap_lock);
 
     if (s_ble_mutex == NULL)
     {

@@ -10,7 +10,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/portmacro.h"
 #include "freertos/task.h"
-#include "services/power_policy.h"
+#include "services/power/power_policy.h"
 
 #define TAG "haptic_alert_player"
 
