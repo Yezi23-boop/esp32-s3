@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vue to LVGL Pixel UI"
+  short_description: "Pixel-accurate Vue, LVGL host, and watch validation"
+  default_prompt: "Use $vue-lvgl-pixel-ui to design a watch UI in Vue, reproduce it in LVGL, compare screenshots, and prepare board validation."

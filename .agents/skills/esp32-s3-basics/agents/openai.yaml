@@ -1,0 +1,4 @@
+interface:
+  display_name: "ESP32-S3 基础与调试"
+  short_description: "芯片、外设、内存与 FreeRTOS 故障排查"
+  default_prompt: "Use $esp32-s3-basics to review an ESP32-S3 peripheral, memory, bus, or FreeRTOS issue."

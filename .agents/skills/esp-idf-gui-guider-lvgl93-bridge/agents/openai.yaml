@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "项目：ESP-IDF GUI-Guider 衔接"
+  short_description: "读懂 GUI Guider 导出的 LVGL 代码，并梳理与 ESP-IDF 手写层的衔接"
+  default_prompt: "Use $esp-idf-gui-guider-lvgl93-bridge to analyze a GUI-Guider exported LVGL 9.3 codebase and explain how it should connect to hand-written ESP-IDF UI logic."

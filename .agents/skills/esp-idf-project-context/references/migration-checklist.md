@@ -1,0 +1,56 @@
+# Migration Checklist
+
+Use this checklist when converting an existing `ESP-IDF / ESP32` repository to a cleaner Codex project-context structure.
+
+- Confirm the repository is actually an `ESP-IDF / ESP32` project.
+- Inventory the current context entrypoints:
+  - root `AGENTS.md`
+  - `.codex/config.toml`
+  - `boards/`
+  - `docs/context`
+  - `docs/context/INDEX.agent.md`
+  - `docs/context/knowledge/project/project-profile.md`
+  - local `AGENTS.md`
+  - context retrieval scripts, especially `scripts/context/validate_context.py`
+- Classify each issue as:
+  - `missing`
+  - `overweight`
+  - `misaligned`
+  - `stale-routing`
+  - `over-read-risk`
+- **If root `AGENTS.md` already has 100+ lines of repo-specific rules**: do NOT replace with template. Instead, identify sections that can move to `docs/context/knowledge/` and keep root as a summary with links.
+- **If the repo already has a mature context garden** (`INDEX.agent.md`, `project-profile.md`, `validate_context.py`, `plans/`, `runs/`, `knowledge/`): do NOT do a broad migration. Repair only the stale route or missing validation rule.
+- Default mature-repo entry:
+  `uv run python scripts/context/validate_context.py --level light --q "<task keywords>" --brief`
+- Treat `query.py` and `pack_context.py` as advanced/debug tools when `validate_context.py` exists.
+- For a mature repo of this style, check the authority chain before editing:
+  - `INDEX.agent.md`
+  - `project-profile.md`
+  - `project-framework.md`
+  - `runtime-owner-contract.md`
+  - `layering-boundary-map.md`
+  - `context-memory-policy.md`
+  - `context-garden-policy.md`
+- Classify current-framework issues as:
+  - `framework-drift`
+  - `memory-drift`
+  - `garden-debt`
+  - `stale-routing`
+  - `over-read-risk`
+- Tighten the root `AGENTS.md` first.
+- Tighten `.codex/config.toml` second.
+- Add or normalize a documentation-first `boards/` layer third.
+- Add or refresh a long-term context mechanism note fourth.
+- Repair local `AGENTS.md` references and boundary wording last.
+- If a card with `route_area` frontmatter is added or changed, run `uv run python scripts/context/generate_index.py`.
+- If startup phases, owner boundaries, resource budget, long-lived services, context routing, or memory/garden behavior change, update `project-framework.md` and `docs/context/CHANGELOG.md`.
+- Use `runs/attempt` for major reusable error signatures or route choices, not for one-off command noise.
+- For validation levels:
+  - ordinary lookup: `--level light`
+  - context docs only: `--level standard`
+  - entrypoint or routing changes: `--level routing`
+  - `scripts/context` or memory mechanism changes: `--level full`
+- Re-read all changed files and verify links.
+- Inspect diff scope so the migration stays on context files only.
+- Do not run firmware build, flash, or monitor for context-only changes.
+- Treat board-code migration as a separate task unless the user explicitly asks for it.

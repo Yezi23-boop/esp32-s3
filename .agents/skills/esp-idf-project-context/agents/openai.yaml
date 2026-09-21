@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目：ESP-IDF Project Context"
+  short_description: "维护 ESP-IDF 项目的上下文路由、记忆和迁移规则"
+  default_prompt: "Use $esp-idf-project-context to analyze or update this ESP-IDF/ESP32 repository's AGENTS.md, docs/context, validate_context.py routing, project-framework, runtime-owner-contract, layering-boundary-map, memory/runs/garden policy, and migration rules without confusing context cleanup with firmware refactors."

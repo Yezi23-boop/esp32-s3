@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目：嵌入式框架导师"
+  short_description: "当前 ESP-IDF 手表项目的 owner、分层、后台能力和低功耗架构导师"
+  default_prompt: "Use $embedded-framework-mentor to judge the owner layer, forbidden paths, module boundary, minimal implementation path, risks, and verification steps for this ESP-IDF watch firmware task."

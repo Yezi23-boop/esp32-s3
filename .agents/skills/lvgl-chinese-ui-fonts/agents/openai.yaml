@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目：LVGL 中文字体"
+  short_description: "项目 5500 通用字库、动态文本与按需子集生成规则"
+  default_prompt: "Use $lvgl-chinese-ui-fonts for this repository's LVGL Chinese font binding, common_5500 coverage, and on-demand large-text subset generation."

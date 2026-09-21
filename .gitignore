@@ -7,8 +7,9 @@ sdkconfig.old
 managed_components/
 dependencies.lock
 
-# AI agent 工具目录
-.agents/
+# AI agent 工具目录（.agents/skills 随仓库开源，其余工具配置不入库）
+.agents/*
+!.agents/skills/
 .codebuddy/
 .codegraph/
 .codex/

@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目：GUI Guider LVGL 预览"
+  short_description: "为 GUI Guider 项目生成 LVGL 主机预览、截图和集成建议"
+  default_prompt: "Use $gui-guider-lvgl-preview to turn my UI idea into LVGL preview code, screenshots, a runnable host preview, and a brief main/ui integration suggestion."

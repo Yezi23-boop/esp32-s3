@@ -1,0 +1,15 @@
+# Discoverability-only Codex project config for ESP-IDF / ESP32 repositories.
+
+project_root_markers = [
+  ".git",
+  "CMakeLists.txt",
+  "sdkconfig.defaults",
+  "main",
+  "idf_component.yml",
+]
+
+project_doc_fallback_filenames = [
+  "README.md",
+  "docs/context/README.md",
+  "docs/context/knowledge/project/README.md",
+]
