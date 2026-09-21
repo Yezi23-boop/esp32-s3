@@ -6,7 +6,7 @@
 
 先读：
 
-- `docs/context/knowledge/project/repo-overview.md`
+- `main/` 与 `components/` 的目录结构，以及各自的 `CMakeLists.txt`（若仓库带上下文库，其中的模块总览卡优先级更高）
 
 要回答的问题：
 
@@ -20,7 +20,7 @@
 
 先读：
 
-- `docs/context/knowledge/project/network-provisioning-custom-upper-architecture.md`
+- `components/network_manager/`、`components/wifi_control/`、`components/network_provisioning_adapter/`、`components/ap_portal_adapter/` 的对外头文件与相互引用方向
 
 要回答的问题：
 
@@ -32,7 +32,7 @@
 
 先读：
 
-- `docs/context/knowledge/project/wifi-management-ui-behavior.md`
+- `main/ui/custom/wifi_management_controller.c` 的动作处理，与 `main/ui/generated/events_init.c` 里对应控件的事件绑定
 
 要回答的问题：
 
@@ -44,8 +44,8 @@
 
 先读：
 
-- `docs/context/knowledge/project/softap-captive-portal-auto-popup.md`
-- 当前配网相关日志和上下文卡
+- `components/ap_portal_adapter/` 与 `components/captive_portal_dns/` 的请求/应答时序，以及 `main/services/network/network_service.c` 的状态推进
+- 当前配网相关串口日志（`boot_stage:` 与各 service 的 `ESP_LOG*`）
 
 要回答的问题：
 

@@ -90,6 +90,11 @@ idf.py -p <PORT> monitor
 | 音乐服务（网易云） | 配网 / NVS 配置 `base_url`、`device_id`、`device_token` | 服务端源码见 `server/music_service/`，需自行部署并配置设备 token；网易云登录态与播放地址由服务端持有，手表只做扫码登录与音频流播放 |
 | OTA 服务器 | `menuconfig` → Standalone HTTPS OTA | 可选 OneNET，或自建 HTTPS 清单并填写 URL 与允许的 host |
 
+> **关于网易云音乐**：`server/music_service/` 通过第三方非官方接口
+> （`@neteasecloudmusicapienhanced/api`）访问曲库，需要部署者用**自己的网易云账号**扫码登录，
+> 不是开箱即可播放。非官方接口存在账号被风控 / 限制的可能，请自行评估合规性与账号风险；
+> 本项目不附带账号、Cookie 或任何鉴权代理。
+
 ### 配网
 
 1. 进入配网模式

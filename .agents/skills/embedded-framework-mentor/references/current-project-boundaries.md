@@ -2,14 +2,12 @@
 
 本文件只描述当前仓库已经成立的模块边界，不讨论通用理论。
 
-主要依据：
+主要依据（若仓库带上下文库，优先读其中的边界卡；否则按下述代码入口自行确认）：
 
-- `docs/context/knowledge/project/project-framework.md`
-- `docs/context/knowledge/project/runtime-owner-contract.md`
-- `docs/context/knowledge/project/layering-boundary-map.md`
-- `docs/context/knowledge/project/network-provisioning-custom-upper-architecture.md`
-- `docs/context/knowledge/project/low-power-management-baseline.md`
-- `docs/context/knowledge/project/low-power-framework-architecture.md`
+- 启动阶段与资源 owner：`main/app/app_main.c` 的启动序列
+- 分层与调用方向：`main/services/**`、`main/features/**`、`main/ui/**`、`components/*/include`
+- 网络配网上层：`components/network_manager/`、`components/network_provisioning_adapter/`、`components/ap_portal_adapter/`
+- 低功耗基线：`main/services/power/`（`power_policy` / `sleep_coordinator` / `wakeup_evidence_service`）
 
 ## 统一判断原则
 

@@ -7,7 +7,7 @@ description: Use the repository's Vue-to-LVGL pixel UI workflow for new watch pa
 
 Treat Vue as the visual source, the LVGL host as the reproduction gate, and the physical watch as the final acceptance target. Keep the phases serial and reuse the existing UI owners.
 
-Read `docs/context/knowledge/project/vue-lvgl-pixel-ui-workflow.md` before changing UI. Also read `docs/context/knowledge/project/gui-guider-lvgl-host-preview-workflow.md` when building or capturing the host preview.
+Before changing UI, follow the workflow sections in this skill (classification → Vue baseline → LVGL reproduction → layered comparison → acceptance). When building or capturing the host preview, follow the host-preview steps below. If the repository ships a context library, prefer its UI workflow cards.
 
 ## 1. Classify The Request
 
